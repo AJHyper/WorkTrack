@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from '../config/firebase';
 
 const { width } = Dimensions.get('window');
@@ -112,6 +112,50 @@ const Profile: React.FC = () => {
     }
   };
 
+  const deletePhoto = async () => {
+    if (!user) {
+      Alert.alert('Error', 'User not logged in!');
+      return;
+    }
+
+    Alert.alert(
+      'Delete Photo',
+      'Are you sure you want to delete your profile photo?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const storageRef = ref(storage, `users/${user.uid}/profile.jpg`);
+              // Delete from storage
+              await deleteObject(storageRef).catch((error) => {
+                // If file doesn't exist, ignore error
+                if (error.code !== 'storage/object-not-found') {
+                  throw error;
+                }
+              });
+
+              // Remove profilePhoto field in Firestore
+              await setDoc(
+                doc(db, 'users', user.uid),
+                { profilePhoto: '' },
+                { merge: true }
+              );
+
+              setImageUri(null);
+              Alert.alert('Deleted', 'Profile photo has been removed.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete profile photo.');
+              console.error('Delete Error:', error);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const saveChanges = async () => {
     if (!user) {
       Alert.alert('Error', 'User not logged in!');
@@ -171,6 +215,13 @@ const Profile: React.FC = () => {
               </View>
             )}
           </TouchableOpacity>
+
+          {/* Delete photo button only shows if there is a profile photo */}
+          {imageUri && (
+            <TouchableOpacity onPress={deletePhoto} style={styles.deleteButton}>
+              <Text style={styles.deleteButtonText}>Delete Photo</Text>
+            </TouchableOpacity>
+          )}
 
           <Text style={styles.label}>Email Address</Text>
           <Text style={[styles.input, styles.readOnly]}>{email}</Text>
@@ -233,7 +284,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 10,
   },
   image: {
     width: '100%',
@@ -247,6 +298,19 @@ const styles = StyleSheet.create({
   placeholderText: {
     color: '#1E3A8A',
     fontSize: 16,
+  },
+  deleteButton: {
+    alignSelf: 'center',
+    marginBottom: 20,
+    backgroundColor: '#FF4D4D',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
   label: {
     fontSize: 14,
