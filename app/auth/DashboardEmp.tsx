@@ -18,16 +18,36 @@ import {
 const { width, height } = Dimensions.get('window');
 
 interface DashboardProps {
-  userName: string; // logged-in user's name passed as prop
+  firstName: string; // from profile page
+  lastName: string;  // from profile page
+  profileImageUri?: string; // optional profile image URI from profile page
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ userName }) => {
+const Dashboard: React.FC<DashboardProps> = ({ firstName, lastName, profileImageUri }) => {
   const router = useRouter();
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
 
-  const handleCheckIn = () => setCheckInTime(new Date());
-  const handleCheckOut = () => setCheckOutTime(new Date());
+  const handleCheckIn = () => {
+    if (checkInTime && !checkOutTime) {
+      Alert.alert('Already checked in', 'You have already checked in and not checked out yet.');
+      return;
+    }
+    setCheckInTime(new Date());
+    setCheckOutTime(null);
+  };
+
+  const handleCheckOut = () => {
+    if (!checkInTime) {
+      Alert.alert('Check in first', 'Please check in before checking out.');
+      return;
+    }
+    if (checkOutTime) {
+      Alert.alert('Already checked out', 'You have already checked out.');
+      return;
+    }
+    setCheckOutTime(new Date());
+  };
 
   const calculateHoursWorked = () => {
     if (checkInTime && checkOutTime) {
@@ -53,6 +73,8 @@ const Dashboard: React.FC<DashboardProps> = ({ userName }) => {
           router.push('/auth/Login');
           Alert.alert('Logged out', 'You have successfully logged out.');
         }}
+        accessibilityLabel="Log out"
+        accessibilityRole="button"
       >
         <Feather name="log-out" size={24} color="#fff" />
       </TouchableOpacity>
@@ -60,8 +82,15 @@ const Dashboard: React.FC<DashboardProps> = ({ userName }) => {
       <ScrollView contentContainerStyle={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Profile Section */}
         <View style={styles.profileSection}>
-          <Image source={require('../../assets/images/Profile.png')} style={styles.avatar} />
-          <Text style={styles.name}>{userName}</Text>
+          <Image
+            source={
+              profileImageUri
+                ? { uri: profileImageUri }
+                : require('../../assets/images/Profile.png')
+            }
+            style={styles.avatar}
+          />
+          <Text style={styles.name}>{firstName} {lastName}</Text>
         </View>
 
         {/* Work Hours Card */}
@@ -69,13 +98,27 @@ const Dashboard: React.FC<DashboardProps> = ({ userName }) => {
           <Text style={styles.cardLabel}>Total hours worked today</Text>
           <Text style={styles.cardValue}>{calculateHoursWorked()} Hours</Text>
 
+          <Text style={styles.timeLabel}>Checked In at: {checkInTime ? checkInTime.toLocaleTimeString() : '--'}</Text>
+          <Text style={styles.timeLabel}>Checked Out at: {checkOutTime ? checkOutTime.toLocaleTimeString() : '--'}</Text>
+
           <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.checkInButton} onPress={handleCheckIn}>
+            <TouchableOpacity
+              style={styles.checkInButton}
+              onPress={handleCheckIn}
+              accessibilityLabel="Check in for work"
+              accessibilityRole="button"
+            >
               <Text style={styles.buttonText}>Check In</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.checkOutButton} onPress={handleCheckOut}>
-              <Text style={styles.buttonText}>Check Out</Text>
+            <TouchableOpacity
+              style={[styles.checkOutButton, !checkInTime && { opacity: 0.5 }]}
+              onPress={handleCheckOut}
+              disabled={!checkInTime}
+              accessibilityLabel="Check out from work"
+              accessibilityRole="button"
+            >
+              <Text style={styles.buttonTextCheckOut}>Check Out</Text>
             </TouchableOpacity>
           </View>
 
@@ -86,17 +129,32 @@ const Dashboard: React.FC<DashboardProps> = ({ userName }) => {
         <Text style={styles.exploreTitle}>Explore</Text>
 
         <View style={styles.exploreGrid}>
-          <TouchableOpacity style={styles.exploreTile} onPress={() => router.push('/Profile')}>
+          <TouchableOpacity
+            style={styles.exploreTile}
+            onPress={() => router.push('/Profile')}
+            accessibilityLabel="Go to Profile"
+            accessibilityRole="button"
+          >
             <Feather name="user" size={24} color="#1E3A8A" />
             <Text style={styles.exploreLabel}>Profile</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.exploreTile} onPress={() => router.push('/IndividualAttendance')}>
+          <TouchableOpacity
+            style={styles.exploreTile}
+            onPress={() => router.push('/IndividualAttendance')}
+            accessibilityLabel="View my logs"
+            accessibilityRole="button"
+          >
             <Feather name="calendar" size={24} color="#1E3A8A" />
             <Text style={styles.exploreLabel}>My Logs</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.exploreTile} onPress={() => router.push('/ProjectDetails')}>
+          <TouchableOpacity
+            style={styles.exploreTile}
+            onPress={() => router.push('/ProjectDetails')}
+            accessibilityLabel="View tasks"
+            accessibilityRole="button"
+          >
             <Feather name="briefcase" size={24} color="#1E3A8A" />
             <Text style={styles.exploreLabel}>Tasks</Text>
           </TouchableOpacity>
@@ -169,6 +227,10 @@ const styles = StyleSheet.create({
     color: '#000',
     marginVertical: 10,
   },
+  timeLabel: {
+    fontSize: 14,
+    color: '#000',
+  },
   buttonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -194,6 +256,11 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  buttonTextCheckOut: {
+    color: '#1E3A8A',
     fontSize: 16,
     textAlign: 'center',
   },

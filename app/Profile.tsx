@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import { auth, db, storage } from '../config/firebase'; // Adjust path as needed
+import { auth, db, storage } from '../config/firebase';
 
 const { width } = Dimensions.get('window');
 
@@ -103,7 +103,7 @@ const Profile: React.FC = () => {
         setImageUri(downloadURL);
       } catch (error) {
         Alert.alert('Upload Error', 'Failed to upload profile photo.');
-        console.error(error);
+        console.error('Upload Error:', error);
       }
     }
   };
