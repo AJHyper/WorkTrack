@@ -1,7 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
@@ -16,7 +15,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { auth, db } from '../config/firebase';
+
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { auth, db, storage } from '../config/firebase'; // Adjust path as needed
 
 const { width } = Dimensions.get('window');
 
@@ -24,29 +27,37 @@ const Profile: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  const [user, setUser] = useState<User | null>(null);
+  const [email, setEmail] = useState('');
+
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadProfile = async () => {
-      const user = auth.currentUser;
-      if (user) {
-        setEmail(user.email ?? '');
-        const docRef = doc(db, 'users', user.uid);
+    const unsubscribe = onAuthStateChanged(auth, async (usr) => {
+      if (usr) {
+        setUser(usr);
+        setEmail(usr.email || '');
+
+        const docRef = doc(db, 'users', usr.uid);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
           const data = docSnap.data();
-          setFirstName(data.firstName || '');
-          setLastName(data.lastName || '');
-          setImageUri(data.profilePhoto || null);
+          if (data.profilePhoto) setImageUri(data.profilePhoto);
+          if (data.firstName) setFirstName(data.firstName);
+          if (data.lastName) setLastName(data.lastName);
         }
+      } else {
+        setUser(null);
+        setEmail('');
+        setImageUri(null);
+        setFirstName('');
+        setLastName('');
       }
-    };
-
-    loadProfile();
+    });
+    return unsubscribe;
   }, []);
 
   const goBack = () => {
@@ -66,40 +77,83 @@ const Profile: React.FC = () => {
     });
 
     if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setImageUri(uri);
+      const localUri = result.assets[0].uri;
+      setImageUri(localUri);
+
+      if (!user) {
+        Alert.alert('Error', 'User not logged in!');
+        return;
+      }
+
+      try {
+        const response = await fetch(localUri);
+        const blob = await response.blob();
+
+        const storageRef = ref(storage, `users/${user.uid}/profile.jpg`);
+        await uploadBytes(storageRef, blob);
+
+        const downloadURL = await getDownloadURL(storageRef);
+
+        await setDoc(
+          doc(db, 'users', user.uid),
+          { profilePhoto: downloadURL },
+          { merge: true }
+        );
+
+        setImageUri(downloadURL);
+      } catch (error) {
+        Alert.alert('Upload Error', 'Failed to upload profile photo.');
+        console.error(error);
+      }
     }
   };
 
   const saveChanges = async () => {
+    if (!user) {
+      Alert.alert('Error', 'User not logged in!');
+      return;
+    }
+
     try {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      const docRef = doc(db, 'users', user.uid);
-      await setDoc(docRef, {
-        firstName,
-        lastName,
-        profilePhoto: imageUri,
-      });
-
+      await setDoc(
+        doc(db, 'users', user.uid),
+        { firstName, lastName },
+        { merge: true }
+      );
       Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
       Alert.alert('Error', 'Failed to save profile changes.');
+      console.error(error);
     }
   };
 
   return (
     <>
       <StatusBar barStyle="light-content" backgroundColor="#003399" />
+
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top, height: 28 + insets.top }]}>
-          <TouchableOpacity style={styles.backButton} onPress={goBack}>
-            <Feather name="arrow-left" size={20} color="white" />
+        <View
+          style={[
+            styles.header,
+            {
+              paddingTop: insets.top,
+              height: 60 + insets.top,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={{ position: 'absolute', left: 16, top: insets.top + 10 }}
+            onPress={goBack}
+          >
+            <Feather name="arrow-left" size={30} color="white" />
           </TouchableOpacity>
+
           <Text style={styles.headerTitle}>Profile</Text>
-          <View style={styles.rightPlaceholder} />
         </View>
 
         {/* Content */}
@@ -151,24 +205,13 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#003399',
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 16,
-    justifyContent: 'space-between',
-    height: 28,
-  },
-  backButton: {
-    padding: 4,
   },
   headerTitle: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 28,
     fontWeight: 'bold',
     textAlign: 'center',
-    flex: 1,
-  },
-  rightPlaceholder: {
-    width: 32,
   },
   container: {
     flex: 1,
