@@ -5,23 +5,26 @@ import {
   Alert,
   Dimensions,
   Image,
+  Platform,
   SafeAreaView,
+  ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
-const Dashboard = () => {
+interface DashboardProps {
+  userName: string; // logged-in user's name passed as prop
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ userName }) => {
   const router = useRouter();
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
-
-  // Replace these with dynamic values from context or props
-  const employeeName = 'Alfred Jokelin';
-  const employeeTitle = 'Software Intern';
 
   const handleCheckIn = () => setCheckInTime(new Date());
   const handleCheckOut = () => setCheckOutTime(new Date());
@@ -38,8 +41,10 @@ const Dashboard = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Circular Blue Header */}
-      <View style={styles.headerContainer} />
+      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
+
+      {/* Blue Circular Header */}
+      <View style={styles.headerBackground} />
 
       {/* Logout Button */}
       <TouchableOpacity
@@ -52,58 +57,51 @@ const Dashboard = () => {
         <Feather name="log-out" size={24} color="#fff" />
       </TouchableOpacity>
 
-      {/* Profile Section */}
-      <View style={styles.profileSection}>
-        <Image source={require('../../assets/images/Profile.png')} style={styles.avatar} />
-        <Text style={styles.name}>{employeeName}</Text>
-        <Text style={styles.role}>{employeeTitle}</Text>
-      </View>
-
-      {/* Work Hours Card */}
-      <View style={styles.card}>
-        <Text style={styles.cardLabel}>Total hours worked today</Text>
-        <Text style={styles.cardValue}>{calculateHoursWorked()} Hours</Text>
-
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.checkInButton} onPress={handleCheckIn}>
-            <Text style={styles.buttonText}>Check In</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.checkOutButton} onPress={handleCheckOut}>
-            <Text style={styles.buttonText}>Check Out</Text>
-          </TouchableOpacity>
+      <ScrollView contentContainerStyle={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Profile Section */}
+        <View style={styles.profileSection}>
+          <Image source={require('../../assets/images/Profile.png')} style={styles.avatar} />
+          <Text style={styles.name}>{userName}</Text>
         </View>
 
-        <Text style={styles.cardDate}>Date: {currentDate}</Text>
-      </View>
+        {/* Work Hours Card */}
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>Total hours worked today</Text>
+          <Text style={styles.cardValue}>{calculateHoursWorked()} Hours</Text>
 
-      {/* Explore Section */}
-      <Text style={styles.exploreTitle}>Explore</Text>
-      <View style={styles.exploreGrid}>
-        <TouchableOpacity 
-          style={styles.exploreTile} 
-          onPress={() => router.push('/Profile')}  // Navigate to Profile.tsx
-        >
-          <Feather name="user" size={24} color="#1E3A8A" />
-          <Text style={styles.exploreLabel}>Profile</Text>
-        </TouchableOpacity>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity style={styles.checkInButton} onPress={handleCheckIn}>
+              <Text style={styles.buttonText}>Check In</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.exploreTile} 
-          onPress={() => router.push('/IndividualAttendance')} // Navigate to Attendance.tsx
-        >
-          <Feather name="calendar" size={24} color="#1E3A8A" />
-          <Text style={styles.exploreLabel}>Attendance</Text>
-        </TouchableOpacity>
+            <TouchableOpacity style={styles.checkOutButton} onPress={handleCheckOut}>
+              <Text style={styles.buttonText}>Check Out</Text>
+            </TouchableOpacity>
+          </View>
 
-        <TouchableOpacity 
-          style={styles.exploreTile}
-          onPress={() => router.push('/ProjectDetails')}
-        >
-          <Feather name="briefcase" size={24} color="#1E3A8A" />
-          <Text style={styles.exploreLabel}>Projects</Text>
-        </TouchableOpacity>
-      </View>
+          <Text style={styles.cardDate}>Date: {currentDate}</Text>
+        </View>
+
+        {/* Explore Section */}
+        <Text style={styles.exploreTitle}>Explore</Text>
+
+        <View style={styles.exploreGrid}>
+          <TouchableOpacity style={styles.exploreTile} onPress={() => router.push('/Profile')}>
+            <Feather name="user" size={24} color="#1E3A8A" />
+            <Text style={styles.exploreLabel}>Profile</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.exploreTile} onPress={() => router.push('/IndividualAttendance')}>
+            <Feather name="calendar" size={24} color="#1E3A8A" />
+            <Text style={styles.exploreLabel}>My Logs</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.exploreTile} onPress={() => router.push('/ProjectDetails')}>
+            <Feather name="briefcase" size={24} color="#1E3A8A" />
+            <Text style={styles.exploreLabel}>Tasks</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -112,43 +110,44 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#E6F0FF',
-    alignItems: 'center',
   },
-  headerContainer: {
+  scrollView: {
+    alignItems: 'center',
+    paddingBottom: 40,
+  },
+  headerBackground: {
     position: 'absolute',
-    width: width,
-    height: height * 0.4875, // Increased by 30% from 0.375
-    borderBottomLeftRadius: width / 2,
-    borderBottomRightRadius: width / 2,
+    width: width * 1.2,
+    height: height * 0.45,
+    borderBottomLeftRadius: width,
+    borderBottomRightRadius: width,
     backgroundColor: '#1E3A8A',
     top: 0,
+    left: -width * 0.1,
   },
   logoutButton: {
     position: 'absolute',
-    top: 50,
+    top: Platform.OS === 'android' ? StatusBar.currentHeight! + 10 : 50,
     left: 20,
+    zIndex: 10,
   },
   profileSection: {
-    marginTop: height * 0.12, // Increased by 20% from 0.15
+    marginTop: height * 0.07,
     alignItems: 'center',
   },
   avatar: {
-    width: 200, // doubled size
-    height: 200,
-    borderRadius: 100,
+    width: width * 0.5,
+    height: width * 0.5,
+    borderRadius: width * 0.25,
     borderWidth: 2,
     borderColor: '#000',
     backgroundColor: '#fff',
   },
   name: {
     marginTop: 12,
-    fontSize: 32,
+    fontSize: width * 0.07,
     color: '#fff',
     fontWeight: 'bold',
-  },
-  role: {
-    fontSize: 22,
-    color: '#fff',
   },
   card: {
     backgroundColor: '#B3D4FC',
@@ -157,7 +156,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginTop: 20,
-    width: '85%',
+    width: width * 0.85,
     alignItems: 'center',
   },
   cardLabel: {
@@ -180,7 +179,7 @@ const styles = StyleSheet.create({
   checkInButton: {
     backgroundColor: '#1E3A8A',
     paddingVertical: 14,
-    paddingHorizontal: 26,
+    paddingHorizontal: 16,
     borderRadius: 10,
     flex: 1,
     marginRight: 6,
@@ -188,13 +187,13 @@ const styles = StyleSheet.create({
   checkOutButton: {
     backgroundColor: '#D6E9FF',
     paddingVertical: 14,
-    paddingHorizontal: 26,
+    paddingHorizontal: 16,
     borderRadius: 10,
     flex: 1,
     marginLeft: 6,
   },
   buttonText: {
-    color: '#fff', // white text for better contrast
+    color: '#fff',
     fontSize: 16,
     textAlign: 'center',
   },
@@ -211,16 +210,18 @@ const styles = StyleSheet.create({
   },
   exploreGrid: {
     flexDirection: 'row',
+    width: width * 0.85,
     justifyContent: 'space-between',
-    width: '85%',
-    marginBottom: 30,
+    marginBottom: 20,
+    flexWrap: 'wrap',
   },
   exploreTile: {
     alignItems: 'center',
     padding: 14,
     borderRadius: 16,
     backgroundColor: '#fff',
-    width: '28%',
+    width: (width * 0.85 - 24) / 3,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.1,
@@ -235,4 +236,3 @@ const styles = StyleSheet.create({
 });
 
 export default Dashboard;
-  

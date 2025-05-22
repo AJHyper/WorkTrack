@@ -36,7 +36,7 @@ const Login = () => {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      router.replace('/auth/DashboardEmp'); // ✅ Replace with your home screen
+      router.replace('/auth/DashboardEmp'); // Navigate to Dashboard
     } catch (error: any) {
       console.log('Login error:', error);
       Alert.alert('Login Failed', error.message);
@@ -45,8 +45,8 @@ const Login = () => {
     }
   };
 
-  const handleRegister = () => {
-    router.push('/auth/Register');
+  const handleForgotPassword = () => {
+    router.push('/auth/ForgotPassword');
   };
 
   return (
@@ -61,7 +61,7 @@ const Login = () => {
       <Text style={styles.loginInstruction}>Log in to continue using the app</Text>
 
       <TextInput
-        style={[styles.inputField, styles.mobileInput]}
+        style={styles.inputField}
         placeholder="Email Address"
         placeholderTextColor="#aaa"
         keyboardType="email-address"
@@ -101,8 +101,8 @@ const Login = () => {
         </Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.registerButton} onPress={handleRegister}>
-        <Text style={styles.registerText}>Don't have an account? Register</Text>
+      <TouchableOpacity onPress={handleForgotPassword}>
+        <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
       </TouchableOpacity>
     </View>
   );
@@ -112,31 +112,29 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#E3F2FD',
-    justifyContent: 'flex-start',
+    justifyContent: 'center', // vertical center
     alignItems: 'center',
+    paddingHorizontal: scale(20),
   },
   logo: {
-    width: scale(87),
-    height: verticalScale(64.66),
-    position: 'absolute',
-    top: verticalScale(160),
+    width: scale(87 * 2), // 100% bigger
+    height: verticalScale(64.66 * 2),
+    marginBottom: verticalScale(20),
+    marginTop: -verticalScale(height * 0.05), // push up 5% screen height
   },
   loginNowText: {
     fontSize: scale(28),
     color: '#000',
-    position: 'absolute',
-    top: verticalScale(215),
+    marginBottom: verticalScale(8),
   },
   loginInstruction: {
     fontSize: scale(16),
     color: '#000',
-    position: 'absolute',
-    top: verticalScale(250),
     width: scale(282),
     textAlign: 'center',
+    marginBottom: verticalScale(20),
   },
   inputField: {
-    position: 'absolute',
     width: scale(300),
     height: verticalScale(40),
     paddingLeft: scale(10),
@@ -144,13 +142,10 @@ const styles = StyleSheet.create({
     borderColor: '#000',
     borderRadius: scale(5),
     fontSize: scale(16),
-  },
-  mobileInput: {
-    top: verticalScale(285),
+    marginBottom: verticalScale(15),
+    backgroundColor: '#fff',
   },
   passwordContainer: {
-    position: 'absolute',
-    top: verticalScale(340),
     width: scale(300),
     height: verticalScale(40),
     flexDirection: 'row',
@@ -159,6 +154,8 @@ const styles = StyleSheet.create({
     borderColor: '#000',
     borderRadius: scale(5),
     paddingHorizontal: scale(10),
+    marginBottom: verticalScale(20),
+    backgroundColor: '#fff',
   },
   passwordInput: {
     flex: 1,
@@ -168,31 +165,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   loginButton: {
-    position: 'absolute',
-    top: verticalScale(410),
     height: verticalScale(56),
     width: scale(250),
     borderRadius: scale(5),
     backgroundColor: '#1E56A0',
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: verticalScale(20),
   },
   buttonText: {
     fontSize: scale(24),
     color: '#fff',
     textAlign: 'center',
   },
-  registerButton: {
-    position: 'absolute',
-    top: verticalScale(475),
-    height: verticalScale(40),
-    width: scale(250),
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  registerText: {
+  forgotPasswordText: {
     fontSize: scale(16),
     color: '#1E56A0',
+    textDecorationLine: 'underline',
   },
 });
 

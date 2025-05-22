@@ -1,13 +1,13 @@
 import { Feather } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   Dimensions,
   Image,
-  Platform,
   SafeAreaView,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -16,181 +16,131 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { auth, db } from '../config/firebase';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
-const Profile = () => {
-  const navigation = useNavigation();
+const Profile: React.FC = () => {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  // Initial saved data
-  const initialProfile = {
-    fullName: 'Alfred Jokelin',
-    mobileNumber: '050-1234567',
-    emailAddress: 'alfredjokelin@rit.com',
-    role: 'Software Intern',
-  };
-
-  const [fullName, setFullName] = useState(initialProfile.fullName);
-  const [mobileNumber, setMobileNumber] = useState(initialProfile.mobileNumber);
-  const [emailAddress, setEmailAddress] = useState(initialProfile.emailAddress);
-  const [role, setRole] = useState(initialProfile.role);
-
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
 
-  // Track if changes have been made
-  const [hasChanges, setHasChanges] = useState(false);
-
-  // Check for changes whenever any field updates
   useEffect(() => {
-    if (
-      fullName !== initialProfile.fullName ||
-      mobileNumber !== initialProfile.mobileNumber ||
-      emailAddress !== initialProfile.emailAddress ||
-      role !== initialProfile.role
-    ) {
-      setHasChanges(true);
-    } else {
-      setHasChanges(false);
+    const loadProfile = async () => {
+      const user = auth.currentUser;
+      if (user) {
+        setEmail(user.email ?? '');
+        const docRef = doc(db, 'users', user.uid);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setFirstName(data.firstName || '');
+          setLastName(data.lastName || '');
+          setImageUri(data.profilePhoto || null);
+        }
+      }
+    };
+
+    loadProfile();
+  }, []);
+
+  const goBack = () => {
+    router.back();
+  };
+
+  const pickImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission required', 'Permission to access photos is needed!');
+      return;
     }
-  }, [fullName, mobileNumber, emailAddress, role]);
 
-  const handleProfilePictureChange = async () => {
-    try {
-      const permissionResult =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+    });
 
-      if (!permissionResult.granted) {
-        alert('Permission to access gallery is required!');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 1,
-      });
-
-      if (result.canceled) {
-        return;
-      }
-
-      if (result.assets && result.assets.length > 0) {
-        setImageUri(result.assets[0].uri);
-      }
-    } catch (error) {
-      console.error('Error picking image:', error);
+    if (!result.canceled) {
+      const uri = result.assets[0].uri;
+      setImageUri(uri);
     }
   };
 
-  const handleSave = () => {
-    // Implement saving logic here (e.g., API call)
-    console.log('Saved:', { fullName, mobileNumber, emailAddress, role });
-    // Update initialProfile (simulate saved state)
-    initialProfile.fullName = fullName;
-    initialProfile.mobileNumber = mobileNumber;
-    initialProfile.emailAddress = emailAddress;
-    initialProfile.role = role;
-    setHasChanges(false);
+  const saveChanges = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const docRef = doc(db, 'users', user.uid);
+      await setDoc(docRef, {
+        firstName,
+        lastName,
+        profilePhoto: imageUri,
+      });
+
+      Alert.alert('Success', 'Profile updated successfully!');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save profile changes.');
+    }
   };
 
   return (
     <>
-      <StatusBar
-        backgroundColor="transparent"
-        translucent
-        barStyle="light-content"
-      />
+      <StatusBar barStyle="light-content" backgroundColor="#003399" />
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <View
-          style={[styles.header, { paddingTop: insets.top, height: 56 + insets.top }]}
-        >
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Feather name="arrow-left" size={24} color="#fff" />
+        <View style={[styles.header, { paddingTop: insets.top, height: 28 + insets.top }]}>
+          <TouchableOpacity style={styles.backButton} onPress={goBack}>
+            <Feather name="arrow-left" size={20} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Profile</Text>
           <View style={styles.rightPlaceholder} />
         </View>
 
-        {/* Body */}
-        <ScrollView
-          style={styles.container}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 80 }}
-        >
-          {/* Profile Image Section */}
-          <View style={styles.profileImageContainer}>
-            <TouchableOpacity onPress={handleProfilePictureChange}>
-              <View style={styles.avatarContainer}>
-                {imageUri ? (
-                  <Image source={{ uri: imageUri }} style={styles.avatar} />
-                ) : (
-                  <Image
-                    source={require('../assets/images/Profile.png')}
-                    style={styles.avatar}
-                  />
-                )}
+        {/* Content */}
+        <View style={styles.container}>
+          <TouchableOpacity onPress={pickImage} style={styles.imageContainer}>
+            {imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.image} />
+            ) : (
+              <View style={styles.placeholder}>
+                <Text style={styles.placeholderText}>Tap to select photo</Text>
               </View>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleProfilePictureChange}>
-              <Text style={styles.editProfileText}>Edit Profile Photo</Text>
-            </TouchableOpacity>
-          </View>
+            )}
+          </TouchableOpacity>
 
-          {/* Form Fields */}
-          <View style={styles.formContainer}>
-            <FormField label="Full Name" value={fullName} onChange={setFullName} />
-            <FormField
-              label="Mobile Number"
-              value={mobileNumber}
-              onChange={setMobileNumber}
-            />
-            <FormField
-              label="Email Address"
-              value={emailAddress}
-              onChange={setEmailAddress}
-            />
-            <FormField label="Role" value={role} onChange={setRole} />
-          </View>
-        </ScrollView>
+          <Text style={styles.label}>Email Address</Text>
+          <Text style={[styles.input, styles.readOnly]}>{email}</Text>
 
-        {/* Save Button */}
-        {hasChanges && (
-          <View style={styles.saveButtonContainer}>
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-              <Text style={styles.saveButtonText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          <Text style={styles.label}>First Name</Text>
+          <TextInput
+            style={styles.input}
+            value={firstName}
+            onChangeText={setFirstName}
+            placeholder="Enter first name"
+            placeholderTextColor="#999"
+          />
+
+          <Text style={styles.label}>Last Name</Text>
+          <TextInput
+            style={styles.input}
+            value={lastName}
+            onChangeText={setLastName}
+            placeholder="Enter last name"
+            placeholderTextColor="#999"
+          />
+
+          <TouchableOpacity onPress={saveChanges} style={styles.saveButton}>
+            <Text style={styles.saveButtonText}>Save Changes</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     </>
-  );
-};
-
-const FormField = ({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (text: string) => void;
-}) => {
-  return (
-    <View style={styles.formFieldContainer}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        style={styles.input}
-        value={value}
-        onChangeText={onChange}
-        placeholder={label}
-        placeholderTextColor="#A0A0A0"
-      />
-    </View>
   );
 };
 
@@ -205,14 +155,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     justifyContent: 'space-between',
-    height: 56,
+    height: 28,
   },
   backButton: {
     padding: 4,
   },
   headerTitle: {
-    color: '#fff',
-    fontSize: 18,
+    color: 'white',
+    fontSize: 14,
     fontWeight: 'bold',
     textAlign: 'center',
     flex: 1,
@@ -222,77 +172,64 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#E6F0FF',
+    paddingHorizontal: 20,
+    paddingTop: 20,
   },
-  profileImageContainer: {
-    alignItems: 'center',
-    marginVertical: 30,
-  },
-  avatarContainer: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
+  imageContainer: {
+    borderRadius: width * 0.25,
+    width: width * 0.5,
+    height: width * 0.5,
+    alignSelf: 'center',
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#1E3A8A',
+    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
-    overflow: 'hidden',
-  },
-  avatar: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-  },
-  editProfileText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#333333',
-    fontWeight: '400',
-  },
-  formContainer: {
-    marginTop: 30,
-    paddingHorizontal: 20,
-  },
-  formFieldContainer: {
     marginBottom: 20,
   },
-  label: {
+  image: {
+    width: '100%',
+    height: '100%',
+  },
+  placeholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    color: '#1E3A8A',
     fontSize: 16,
+  },
+  label: {
+    fontSize: 14,
+    color: '#003399',
+    marginBottom: 6,
     fontWeight: 'bold',
-    color: '#000',
-    marginBottom: 8,
   },
   input: {
     backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#CCCCCC',
+    padding: 12,
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: '#ccc',
+    borderWidth: 1,
     fontSize: 14,
-    color: '#000',
-    width: '100%',
+    marginBottom: 16,
   },
-  saveButtonContainer: {
-    position: 'absolute',
-    bottom: Platform.OS === 'android' ? 20 : 40,
-    left: 20,
-    right: 20,
-    backgroundColor: 'transparent',
+  readOnly: {
+    color: '#555',
   },
   saveButton: {
-    backgroundColor: '#1E3A8A',
-    paddingVertical: 14,
-    borderRadius: 10,
+    backgroundColor: '#003399',
+    paddingVertical: 12,
+    borderRadius: 8,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
+    marginTop: 20,
   },
   saveButtonText: {
     color: '#fff',
-    fontSize: 18,
     fontWeight: 'bold',
+    fontSize: 16,
   },
 });
 

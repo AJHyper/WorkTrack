@@ -1,63 +1,90 @@
+import { auth } from '@/config/firebase';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 import {
   Animated,
   Dimensions,
   StyleSheet,
-  Text,
-  View,
+  View
 } from 'react-native';
-import { colors } from '../constants/theme';
 
 const { width, height } = Dimensions.get('window');
-const guidelineBaseWidth = 360;
-const guidelineBaseHeight = 640;
+const scale = (size: number) => (width / 360) * size;
+const verticalScale = (size: number) => (height / 640) * size;
 
-const scale = (size: number) => (width / guidelineBaseWidth) * size;
-const verticalScale = (size: number) => (height / guidelineBaseHeight) * size;
-
-const SplashScreen = () => {
+const Loading = () => {
   const router = useRouter();
 
   // Animation values
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const logoScale = useRef(new Animated.Value(0)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const textOpacity = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 1000,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 4,
-        useNativeDriver: true,
-      }),
+    // Animate logo scale and fade in
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(logoScale, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(logoOpacity, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ]),
+      // Start infinite pulse animation for loading text
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(textOpacity, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(textOpacity, {
+            toValue: 0.5,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ]),
+      ),
     ]).start();
 
-    const timeout = setTimeout(() => {
-      router.push('/auth/Login');
-    }, 2000);
+    const timer = setTimeout(() => {
+      const user = auth.currentUser;
 
-    return () => clearTimeout(timeout);
-  }, []);
+      if (user?.email) {
+        if (user.email === 'alfredjokelin123@gmail.com') {
+          router.replace('/auth/DashboardEmp');
+        } else {
+          router.replace('/auth/DashboardEmp');
+        }
+      } else {
+        router.replace('/auth/Login');
+      }
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [logoOpacity, logoScale, router, textOpacity]);
 
   return (
     <View style={styles.container}>
       <Animated.Image
-        source={require('@/assets/images/Logo.png')}
-        resizeMode="contain"
         style={[
           styles.logo,
           {
-            opacity: fadeAnim,
-            transform: [{ scale: scaleAnim }],
+            opacity: logoOpacity,
+            transform: [{ scale: logoScale }],
           },
         ]}
+        resizeMode="contain"
+        source={require('../assets/images/Logo.png')}
       />
-      <Text style={styles.title}>Royal International Technology</Text>
+      <Animated.Text style={[styles.loadingText, { opacity: textOpacity }]}>
+        Loading...
+      </Animated.Text>
     </View>
   );
 };
@@ -65,23 +92,20 @@ const SplashScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.primaryLight,
+    backgroundColor: '#E3F2FD',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
   },
   logo: {
-    width: scale(160),
-    height: verticalScale(160),
+    width: scale(87 * 2),
+    height: verticalScale(64.66 * 2),
     marginBottom: verticalScale(20),
   },
-  title: {
-    fontSize: scale(23),
-    color: colors.text,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginTop: -height * 0.06, 
+  loadingText: {
+    fontSize: scale(18),
+    color: '#1E56A0',
+    fontWeight: '600',
   },
 });
 
-export default SplashScreen;
+export default Loading;

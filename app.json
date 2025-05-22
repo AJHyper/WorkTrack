@@ -8,15 +8,16 @@
     "scheme": "worktrack",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "ios": {
-      "supportsTablet": true
-    },
     "android": {
+      "package": "com.alfre.worktrack",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/Logo.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true
+    },
+    "ios": {
+      "supportsTablet": true
     },
     "web": {
       "bundler": "metro",
@@ -37,6 +38,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4d7eaf63-d2dc-45b2-b2ac-b55b0050aedf"
+      }
     }
   }
 }

@@ -17,13 +17,14 @@ import {
 
 const { width, height } = Dimensions.get('window');
 
-const Dashboard = () => {
+interface DashboardProps {
+  userName: string; // logged-in user's name passed as prop
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ userName }) => {
   const router = useRouter();
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
-
-  const employeeName = 'Alfred Jokelin';
-  const employeeTitle = 'Software Intern';
 
   const handleCheckIn = () => setCheckInTime(new Date());
   const handleCheckOut = () => setCheckOutTime(new Date());
@@ -60,8 +61,7 @@ const Dashboard = () => {
         {/* Profile Section */}
         <View style={styles.profileSection}>
           <Image source={require('../../assets/images/Profile.png')} style={styles.avatar} />
-          <Text style={styles.name}>{employeeName}</Text>
-          <Text style={styles.role}>{employeeTitle}</Text>
+          <Text style={styles.name}>{userName}</Text>
         </View>
 
         {/* Work Hours Card */}
@@ -153,9 +153,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatar: {
-    width: width * 0.4,
-    height: width * 0.4,
-    borderRadius: width * 0.2,
+    width: width * 0.5,           // increased from 0.4 to 0.5
+    height: width * 0.5,          // increased from 0.4 to 0.5
+    borderRadius: width * 0.25,   // half of width for circle
     borderWidth: 2,
     borderColor: '#000',
     backgroundColor: '#fff',
@@ -165,10 +165,6 @@ const styles = StyleSheet.create({
     fontSize: width * 0.07,
     color: '#fff',
     fontWeight: 'bold',
-  },
-  role: {
-    fontSize: width * 0.045,
-    color: '#fff',
   },
   card: {
     backgroundColor: '#B3D4FC',
