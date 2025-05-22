@@ -197,19 +197,22 @@ const NewProjectScreen = () => {
 
       <LinearGradient
         colors={[Colors.primaryBlue, Colors.darkBlue]}
-        style={[styles.header, { paddingTop: insets.top }]}
+        style={styles.gradientBackground} // New style for just the gradient background
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          activeOpacity={0.7}
-        >
-          <Feather name="arrow-left" size={28} color={Colors.white} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>New Project</Text>
-        <View style={styles.rightPlaceholder} />
+        {/* Wrap header content in a View */}
+        <View style={[styles.headerContent, { paddingTop: insets.top }]}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+            activeOpacity={0.7}
+          >
+            <Feather name="arrow-left" size={28} color={Colors.white} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>New Project</Text>
+          <View style={styles.rightPlaceholder} />
+        </View>
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
@@ -352,13 +355,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.lighterBlue,
   },
-  header: {
-    backgroundColor: Colors.darkBlue,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    ...Platform.select({
+  gradientBackground: { // New style for the LinearGradient itself
+    backgroundColor: Colors.darkBlue, // Fallback color
+    ...Platform.select({ // Header shadow
       ios: {
         shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
@@ -369,6 +368,13 @@ const styles = StyleSheet.create({
         elevation: 4,
       },
     }),
+  },
+  headerContent: { // New style for the View wrapping header elements
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    height: 60, // Fixed height for content area, insets add on top
   },
   backButton: {
     paddingVertical: 10,
