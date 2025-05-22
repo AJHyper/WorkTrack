@@ -1,4 +1,5 @@
 import { Feather } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -76,7 +77,7 @@ const Profile: React.FC = () => {
       quality: 1,
     });
 
-    if (!result.canceled) {
+    if (!result.canceled && result.assets.length > 0) {
       const localUri = result.assets[0].uri;
       setImageUri(localUri);
 
@@ -86,10 +87,13 @@ const Profile: React.FC = () => {
       }
 
       try {
-        const response = await fetch(localUri);
-        const blob = await response.blob();
+        const fileUri = localUri;
+        const file = await FileSystem.readAsStringAsync(fileUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
 
         const storageRef = ref(storage, `users/${user.uid}/profile.jpg`);
+        const blob = new Uint8Array(Buffer.from(file, 'base64'));
         await uploadBytes(storageRef, blob);
 
         const downloadURL = await getDownloadURL(storageRef);

@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
   Alert,
   Dimensions,
@@ -15,43 +15,133 @@ import {
   View,
 } from 'react-native';
 
+import {
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore';
+import { auth, db } from '../../config/firebase';
+
 const { width, height } = Dimensions.get('window');
 
-interface DashboardProps {
-  firstName: string; // from profile page
-  lastName: string;  // from profile page
-  profileImageUri?: string; // optional profile image URI from profile page
-}
-
-const Dashboard: React.FC<DashboardProps> = ({ firstName, lastName, profileImageUri }) => {
+const Dashboard: React.FC = () => {
   const router = useRouter();
+
+  const [userId, setUserId] = useState<string | null>(null);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const handleCheckIn = () => {
+  const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        router.push('/auth/Login');
+        return;
+      }
+      const uid = user.uid;
+      setUserId(uid);
+
+      // Load user profile
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        setFirstName(data.firstName || '');
+        setLastName(data.lastName || '');
+        setProfilePhoto(data.profilePhoto || null);
+      }
+
+      // Load today's attendance
+      const attRef = doc(db, 'attendance', uid, 'daily', getTodayKey());
+      const attSnap = await getDoc(attRef);
+      if (attSnap.exists()) {
+        const { checkInTime: ci, checkOutTime: co } = attSnap.data();
+        setCheckInTime(ci ? new Date(ci) : null);
+        setCheckOutTime(co ? new Date(co) : null);
+      } else {
+        setCheckInTime(null);
+        setCheckOutTime(null);
+      }
+    } catch (err) {
+      console.error('Error loading data:', err);
+      Alert.alert('Error', 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
+
+  const handleCheckIn = async () => {
+    if (!userId) return;
     if (checkInTime && !checkOutTime) {
-      Alert.alert('Already checked in', 'You have already checked in and not checked out yet.');
+      Alert.alert('Already checked in', 'You have already checked in.');
       return;
     }
-    setCheckInTime(new Date());
+    const now = new Date();
+    setCheckInTime(now);
     setCheckOutTime(null);
+
+    try {
+      await setDoc(
+        doc(db, 'attendance', userId, 'daily', getTodayKey()),
+        {
+          checkInTime: now.toISOString(),
+          checkOutTime: null,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.error('Error saving check-in:', err);
+      Alert.alert('Error', 'Could not save check-in');
+    }
   };
 
-  const handleCheckOut = () => {
+  const handleCheckOut = async () => {
+    if (!userId) return;
     if (!checkInTime) {
-      Alert.alert('Check in first', 'Please check in before checking out.');
+      Alert.alert('Check in first', 'You must check in before checking out.');
       return;
     }
     if (checkOutTime) {
       Alert.alert('Already checked out', 'You have already checked out.');
       return;
     }
-    setCheckOutTime(new Date());
+    const now = new Date();
+    setCheckOutTime(now);
+
+    try {
+      await updateDoc(
+        doc(db, 'attendance', userId, 'daily', getTodayKey()),
+        {
+          checkOutTime: now.toISOString(),
+          updatedAt: serverTimestamp(),
+        }
+      );
+    } catch (err) {
+      console.error('Error saving check-out:', err);
+      Alert.alert('Error', 'Could not save check-out');
+    }
   };
 
   const calculateHoursWorked = () => {
     if (checkInTime && checkOutTime) {
-      const diff = (checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
+      const diff =
+        (checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
       return diff.toFixed(2);
     }
     return '0';
@@ -63,50 +153,48 @@ const Dashboard: React.FC<DashboardProps> = ({ firstName, lastName, profileImage
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
 
-      {/* Blue Circular Header */}
       <View style={styles.headerBackground} />
-
-      {/* Logout Button */}
       <TouchableOpacity
         style={styles.logoutButton}
         onPress={() => {
+          auth.signOut();
           router.push('/auth/Login');
-          Alert.alert('Logged out', 'You have successfully logged out.');
         }}
-        accessibilityLabel="Log out"
-        accessibilityRole="button"
       >
         <Feather name="log-out" size={24} color="#fff" />
       </TouchableOpacity>
 
-      <ScrollView contentContainerStyle={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Profile Section */}
+      <ScrollView contentContainerStyle={styles.scrollView}>
         <View style={styles.profileSection}>
           <Image
             source={
-              profileImageUri
-                ? { uri: profileImageUri }
+              profilePhoto
+                ? { uri: profilePhoto }
                 : require('../../assets/images/Profile.png')
             }
             style={styles.avatar}
           />
-          <Text style={styles.name}>{firstName} {lastName}</Text>
+          <Text style={styles.name}>
+            {firstName} {lastName}
+          </Text>
         </View>
 
-        {/* Work Hours Card */}
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>Total hours worked today</Text>
-          <Text style={styles.cardValue}>{calculateHoursWorked()} Hours</Text>
+          <Text style={styles.cardLabel}>Total hours today</Text>
+          <Text style={styles.cardValue}>{calculateHoursWorked()} hrs</Text>
 
-          <Text style={styles.timeLabel}>Checked In at: {checkInTime ? checkInTime.toLocaleTimeString() : '--'}</Text>
-          <Text style={styles.timeLabel}>Checked Out at: {checkOutTime ? checkOutTime.toLocaleTimeString() : '--'}</Text>
+          <Text style={styles.timeLabel}>
+            In: {checkInTime ? checkInTime.toLocaleTimeString() : '--'}
+          </Text>
+          <Text style={styles.timeLabel}>
+            Out: {checkOutTime ? checkOutTime.toLocaleTimeString() : '--'}
+          </Text>
 
           <View style={styles.buttonRow}>
             <TouchableOpacity
               style={styles.checkInButton}
               onPress={handleCheckIn}
-              accessibilityLabel="Check in for work"
-              accessibilityRole="button"
+              disabled={loading}
             >
               <Text style={styles.buttonText}>Check In</Text>
             </TouchableOpacity>
@@ -114,9 +202,7 @@ const Dashboard: React.FC<DashboardProps> = ({ firstName, lastName, profileImage
             <TouchableOpacity
               style={[styles.checkOutButton, !checkInTime && { opacity: 0.5 }]}
               onPress={handleCheckOut}
-              disabled={!checkInTime}
-              accessibilityLabel="Check out from work"
-              accessibilityRole="button"
+              disabled={!checkInTime || loading}
             >
               <Text style={styles.buttonTextCheckOut}>Check Out</Text>
             </TouchableOpacity>
@@ -125,35 +211,25 @@ const Dashboard: React.FC<DashboardProps> = ({ firstName, lastName, profileImage
           <Text style={styles.cardDate}>Date: {currentDate}</Text>
         </View>
 
-        {/* Explore Section */}
         <Text style={styles.exploreTitle}>Explore</Text>
-
         <View style={styles.exploreGrid}>
           <TouchableOpacity
             style={styles.exploreTile}
             onPress={() => router.push('/Profile')}
-            accessibilityLabel="Go to Profile"
-            accessibilityRole="button"
           >
             <Feather name="user" size={24} color="#1E3A8A" />
             <Text style={styles.exploreLabel}>Profile</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             style={styles.exploreTile}
             onPress={() => router.push('/IndividualAttendance')}
-            accessibilityLabel="View my logs"
-            accessibilityRole="button"
           >
             <Feather name="calendar" size={24} color="#1E3A8A" />
             <Text style={styles.exploreLabel}>My Logs</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             style={styles.exploreTile}
             onPress={() => router.push('/ProjectDetails')}
-            accessibilityLabel="View tasks"
-            accessibilityRole="button"
           >
             <Feather name="briefcase" size={24} color="#1E3A8A" />
             <Text style={styles.exploreLabel}>Tasks</Text>
@@ -165,14 +241,8 @@ const Dashboard: React.FC<DashboardProps> = ({ firstName, lastName, profileImage
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#E6F0FF',
-  },
-  scrollView: {
-    alignItems: 'center',
-    paddingBottom: 40,
-  },
+  container: { flex: 1, backgroundColor: '#E6F0FF' },
+  scrollView: { alignItems: 'center', paddingBottom: 40 },
   headerBackground: {
     position: 'absolute',
     width: width * 1.2,
@@ -189,10 +259,7 @@ const styles = StyleSheet.create({
     left: 20,
     zIndex: 10,
   },
-  profileSection: {
-    marginTop: height * 0.07,
-    alignItems: 'center',
-  },
+  profileSection: { marginTop: height * 0.07, alignItems: 'center' },
   avatar: {
     width: width * 0.5,
     height: width * 0.5,
@@ -217,31 +284,23 @@ const styles = StyleSheet.create({
     width: width * 0.85,
     alignItems: 'center',
   },
-  cardLabel: {
-    fontSize: 16,
-    color: '#000',
-  },
+  cardLabel: { fontSize: 16, color: '#000' },
   cardValue: {
     fontSize: 22,
     fontWeight: 'bold',
     color: '#000',
     marginVertical: 10,
   },
-  timeLabel: {
-    fontSize: 14,
-    color: '#000',
-  },
+  timeLabel: { fontSize: 14, color: '#000' },
   buttonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    marginTop: 8,
-    marginBottom: 8,
+    marginVertical: 8,
   },
   checkInButton: {
     backgroundColor: '#1E3A8A',
     paddingVertical: 14,
-    paddingHorizontal: 16,
     borderRadius: 10,
     flex: 1,
     marginRight: 6,
@@ -249,26 +308,13 @@ const styles = StyleSheet.create({
   checkOutButton: {
     backgroundColor: '#D6E9FF',
     paddingVertical: 14,
-    paddingHorizontal: 16,
     borderRadius: 10,
     flex: 1,
     marginLeft: 6,
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  buttonTextCheckOut: {
-    color: '#1E3A8A',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  cardDate: {
-    marginTop: 8,
-    fontSize: 14,
-    color: '#000',
-  },
+  buttonText: { color: '#fff', fontSize: 16, textAlign: 'center' },
+  buttonTextCheckOut: { color: '#1E3A8A', fontSize: 16, textAlign: 'center' },
+  cardDate: { marginTop: 8, fontSize: 14, color: '#000' },
   exploreTitle: {
     fontSize: 22,
     fontWeight: 'bold',
@@ -283,22 +329,18 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   exploreTile: {
+    width: '30%',
+    backgroundColor: '#B3D4FC',
+    borderRadius: 12,
+    padding: 20,
     alignItems: 'center',
-    padding: 14,
-    borderRadius: 16,
-    backgroundColor: '#fff',
-    width: (width * 0.85 - 24) / 3,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
+    marginBottom: 20,
   },
   exploreLabel: {
-    marginTop: 8,
-    fontSize: 13,
+    marginTop: 10,
+    fontSize: 14,
+    fontWeight: '600',
     color: '#1E3A8A',
-    textAlign: 'center',
   },
 });
 
