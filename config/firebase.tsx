@@ -22,5 +22,9 @@ const auth = initializeAuth(app, {
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-export { auth, db, storage };
+// Define APP_ID using your project ID, which will match your security rules
+export const APP_ID = firebaseConfig.projectId; // <--- This line exports it
+
+// Export auth, db, and storage. APP_ID is already exported above.
+export { app, auth, db, storage }; // <--- APP_ID removed from this list
 

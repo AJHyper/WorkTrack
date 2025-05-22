@@ -1,4 +1,5 @@
 import { auth } from '@/config/firebase';
+import { Buffer } from 'buffer';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 import {
@@ -7,6 +8,7 @@ import {
   StyleSheet,
   View
 } from 'react-native';
+global.Buffer = global.Buffer || Buffer;
 
 const { width, height } = Dimensions.get('window');
 const scale = (size: number) => (width / 360) * size;
@@ -59,7 +61,7 @@ const Loading = () => {
         if (user.email === 'alfredjokelin123@gmail.com') {
           router.replace('/auth/DashboardEmp');
         } else {
-          router.replace('/auth/DashboardEmp');
+          router.replace('/auth/BossDashboard');
         }
       } else {
         router.replace('/auth/Login');

@@ -1,13 +1,15 @@
 import { Feather } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
-import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
-  Image,
+  Platform,
   SafeAreaView,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -19,10 +21,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import { auth, db, storage } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 
 const { width } = Dimensions.get('window');
+
+// --- Consistent Color Palette from DashboardEmp.tsx ---
+const Colors = {
+  primaryBlue: '#2A72B8',      // A deeper, more prominent blue from the logo's vibe
+  darkBlue: '#1F558C',         // An even darker shade for headers/strong accents
+  lightBlue: '#C9DCEC',        // A softer, light blue for backgrounds/cards
+  lighterBlue: '#EAF3FA',      // Very subtle light blue for overall background
+  white: '#FFFFFF',
+  black: '#212121',            // Dark grey for main text
+  mediumGrey: '#757575',       // For secondary text
+  lightGrey: '#BDBDBD',        // For borders/dividers
+};
 
 const Profile: React.FC = () => {
   const router = useRouter();
@@ -30,32 +43,54 @@ const Profile: React.FC = () => {
 
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState('');
+  // Removed userIdDisplay state as it's no longer needed for display
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (usr) => {
       if (usr) {
         setUser(usr);
         setEmail(usr.email || '');
+        // Removed setUserIdDisplay(usr.uid);
 
         const docRef = doc(db, 'users', usr.uid);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
           const data = docSnap.data();
-          if (data.profilePhoto) setImageUri(data.profilePhoto);
-          if (data.firstName) setFirstName(data.firstName);
-          if (data.lastName) setLastName(data.lastName);
+          setFirstName(data.firstName || '');
+          setLastName(data.lastName || '');
+          setPhoneNumber(data.phoneNumber || '');
         }
       } else {
         setUser(null);
         setEmail('');
-        setImageUri(null);
+        // Removed setUserIdDisplay(null);
         setFirstName('');
         setLastName('');
+        setPhoneNumber('');
       }
     });
     return unsubscribe;
@@ -65,97 +100,6 @@ const Profile: React.FC = () => {
     router.back();
   };
 
-  const pickImage = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission required', 'Permission to access photos is needed!');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1,
-    });
-
-    if (!result.canceled && result.assets.length > 0) {
-      const localUri = result.assets[0].uri;
-      setImageUri(localUri);
-
-      if (!user) {
-        Alert.alert('Error', 'User not logged in!');
-        return;
-      }
-
-      try {
-        const fileUri = localUri;
-        const file = await FileSystem.readAsStringAsync(fileUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-
-        const storageRef = ref(storage, `users/${user.uid}/profile.jpg`);
-        const blob = new Uint8Array(Buffer.from(file, 'base64'));
-        await uploadBytes(storageRef, blob);
-
-        const downloadURL = await getDownloadURL(storageRef);
-
-        await setDoc(
-          doc(db, 'users', user.uid),
-          { profilePhoto: downloadURL },
-          { merge: true }
-        );
-
-        setImageUri(downloadURL);
-      } catch (error) {
-        Alert.alert('Upload Error', 'Failed to upload profile photo.');
-        console.error('Upload Error:', error);
-      }
-    }
-  };
-
-  const deletePhoto = async () => {
-    if (!user) {
-      Alert.alert('Error', 'User not logged in!');
-      return;
-    }
-
-    Alert.alert(
-      'Delete Photo',
-      'Are you sure you want to delete your profile photo?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const storageRef = ref(storage, `users/${user.uid}/profile.jpg`);
-              // Delete from storage
-              await deleteObject(storageRef).catch((error) => {
-                // If file doesn't exist, ignore error
-                if (error.code !== 'storage/object-not-found') {
-                  throw error;
-                }
-              });
-
-              // Remove profilePhoto field in Firestore
-              await setDoc(
-                doc(db, 'users', user.uid),
-                { profilePhoto: '' },
-                { merge: true }
-              );
-
-              setImageUri(null);
-              Alert.alert('Deleted', 'Profile photo has been removed.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to delete profile photo.');
-              console.error('Delete Error:', error);
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const saveChanges = async () => {
     if (!user) {
       Alert.alert('Error', 'User not logged in!');
@@ -163,184 +107,203 @@ const Profile: React.FC = () => {
     }
 
     try {
+      setLoading(true);
       await setDoc(
         doc(db, 'users', user.uid),
-        { firstName, lastName },
+        { firstName, lastName, phoneNumber },
         { merge: true }
       );
       Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
       Alert.alert('Error', 'Failed to save profile changes.');
       console.error(error);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <>
-      <StatusBar barStyle="light-content" backgroundColor="#003399" />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" backgroundColor={Colors.darkBlue} />
 
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
-        <View
-          style={[
-            styles.header,
-            {
-              paddingTop: insets.top,
-              height: 60 + insets.top,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative',
-            },
-          ]}
+      {/* Header with LinearGradient, matching Dashboard aesthetic */}
+      <LinearGradient
+        colors={[Colors.primaryBlue, Colors.darkBlue]}
+        style={[styles.header, { paddingTop: insets.top, height: 60 + insets.top }]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <TouchableOpacity
+          style={{ position: 'absolute', left: 16, top: insets.top + 10 }}
+          onPress={goBack}
         >
-          <TouchableOpacity
-            style={{ position: 'absolute', left: 16, top: insets.top + 10 }}
-            onPress={goBack}
-          >
-            <Feather name="arrow-left" size={30} color="white" />
-          </TouchableOpacity>
+          <Feather name="arrow-left" size={28} color={Colors.white} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Profile</Text>
+      </LinearGradient>
 
-          <Text style={styles.headerTitle}>Profile</Text>
-        </View>
+      <Animated.View
+        style={[
+          styles.container,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          },
+        ]}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Profile Card Section */}
+          <View style={styles.profileCard}>
+            {/* User ID (read-only) - REMOVED THIS SECTION */}
 
-        {/* Content */}
-        <View style={styles.container}>
-          <TouchableOpacity onPress={pickImage} style={styles.imageContainer}>
-            {imageUri ? (
-              <Image source={{ uri: imageUri }} style={styles.image} />
-            ) : (
-              <View style={styles.placeholder}>
-                <Text style={styles.placeholderText}>Tap to select photo</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+            {/* Email Address (read-only) */}
+            <Text style={styles.label}>Email Address</Text>
+            <Text style={[styles.input, styles.readOnly]}>{email}</Text>
 
-          {/* Delete photo button only shows if there is a profile photo */}
-          {imageUri && (
-            <TouchableOpacity onPress={deletePhoto} style={styles.deleteButton}>
-              <Text style={styles.deleteButtonText}>Delete Photo</Text>
+            {/* First Name */}
+            <Text style={styles.label}>First Name</Text>
+            <TextInput
+              style={styles.input}
+              value={firstName}
+              onChangeText={setFirstName}
+              placeholder="Enter first name"
+              placeholderTextColor={Colors.mediumGrey}
+            />
+
+            {/* Last Name */}
+            <Text style={styles.label}>Last Name</Text>
+            <TextInput
+              style={styles.input}
+              value={lastName}
+              onChangeText={setLastName}
+              placeholder="Enter last name"
+              placeholderTextColor={Colors.mediumGrey}
+            />
+
+            {/* Phone Number */}
+            <Text style={styles.label}>Phone Number</Text>
+            <TextInput
+              style={styles.input}
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              placeholder="Enter phone number"
+              placeholderTextColor={Colors.mediumGrey}
+              keyboardType="phone-pad"
+            />
+
+            {/* Save Changes Button */}
+            <TouchableOpacity onPress={saveChanges} style={styles.saveButton} disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color={Colors.white} />
+              ) : (
+                <Text style={styles.saveButtonText}>Save Changes</Text>
+              )}
             </TouchableOpacity>
-          )}
-
-          <Text style={styles.label}>Email Address</Text>
-          <Text style={[styles.input, styles.readOnly]}>{email}</Text>
-
-          <Text style={styles.label}>First Name</Text>
-          <TextInput
-            style={styles.input}
-            value={firstName}
-            onChangeText={setFirstName}
-            placeholder="Enter first name"
-            placeholderTextColor="#999"
-          />
-
-          <Text style={styles.label}>Last Name</Text>
-          <TextInput
-            style={styles.input}
-            value={lastName}
-            onChangeText={setLastName}
-            placeholder="Enter last name"
-            placeholderTextColor="#999"
-          />
-
-          <TouchableOpacity onPress={saveChanges} style={styles.saveButton}>
-            <Text style={styles.saveButtonText}>Save Changes</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    </>
+          </View>
+        </ScrollView>
+      </Animated.View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#E6F0FF',
+    backgroundColor: Colors.lighterBlue, // Use lighter blue for background
   },
   header: {
-    backgroundColor: '#003399',
-    paddingHorizontal: 16,
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    ...Platform.select({ // Subtle shadow for the header
+      ios: {
+        shadowColor: Colors.black,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
   },
   headerTitle: {
-    color: 'white',
-    fontSize: 28,
+    color: Colors.white, // White text
+    fontSize: 24, // Slightly smaller than dashboard name, more typical for header
     fontWeight: 'bold',
     textAlign: 'center',
   },
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 20,
   },
-  imageContainer: {
-    borderRadius: width * 0.25,
-    width: width * 0.5,
-    height: width * 0.5,
-    alignSelf: 'center',
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#1E3A8A',
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
+  scrollContent: {
+    paddingVertical: 20, // Add vertical padding to the scrollable content
+    paddingHorizontal: 20, // Horizontal padding for the content
+    alignItems: 'center', // Center the card
   },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  placeholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    color: '#1E3A8A',
-    fontSize: 16,
-  },
-  deleteButton: {
-    alignSelf: 'center',
-    marginBottom: 20,
-    backgroundColor: '#FF4D4D',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  deleteButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
+  profileCard: { // New style for the main content card
+    backgroundColor: Colors.white,
+    borderRadius: 16, // Consistent with dashboard cards/tiles
+    padding: 24,
+    width: width * 0.9, // Match dashboard card width
+    ...Platform.select({ // Add shadow for depth
+      ios: {
+        shadowColor: Colors.black,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
   },
   label: {
     fontSize: 14,
-    color: '#003399',
+    color: Colors.darkBlue, // Use darkBlue for labels
     marginBottom: 6,
-    fontWeight: 'bold',
+    fontWeight: '600', // Semibold
   },
   input: {
-    backgroundColor: '#fff',
+    backgroundColor: Colors.lighterBlue, // Use a very light blue for input background
     padding: 12,
-    borderRadius: 8,
-    borderColor: '#ccc',
+    borderRadius: 8, // Consistent rounded corners
+    borderColor: Colors.lightGrey, // Lighter border color
     borderWidth: 1,
-    fontSize: 14,
+    fontSize: 15, // Slightly larger font for inputs
     marginBottom: 16,
+    color: Colors.black, // Dark text for input
   },
   readOnly: {
-    color: '#555',
+    backgroundColor: Colors.lightBlue, // Slightly darker light blue for read-only fields
+    color: Colors.mediumGrey, // Grey text for read-only
+    fontWeight: 'normal',
   },
   saveButton: {
-    backgroundColor: '#003399',
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: Colors.primaryBlue, // Primary blue for the main action button
+    paddingVertical: 14, // Consistent padding
+    borderRadius: 10, // Consistent rounded corners
     alignItems: 'center',
     marginTop: 20,
+    marginBottom: 10,
+    ...Platform.select({ // Add shadow to button
+      ios: {
+        shadowColor: Colors.primaryBlue,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   saveButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: Colors.white,
+    fontWeight: '600', // Semibold
+    fontSize: 17, // Consistent font size
   },
 });
 
