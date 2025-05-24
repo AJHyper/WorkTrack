@@ -168,7 +168,6 @@ const DashboardEmp: React.FC = () => {
     }
 
     const now = new Date();
-    // setCheckOutTime(now); // This is where the update should happen
 
     try {
       await updateDoc(
@@ -187,14 +186,26 @@ const DashboardEmp: React.FC = () => {
     }
   };
 
-  // --- Calculate Hours Worked ---
+  // --- Calculate Hours Worked in H:M format ---
   const calculateHoursWorked = () => {
     if (checkInTime && checkOutTime) {
-      const diff =
-        (checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
-      return diff.toFixed(2);
+      const diffMilliseconds = checkOutTime.getTime() - checkInTime.getTime();
+      const totalMinutes = Math.floor(diffMilliseconds / (1000 * 60)); // Total minutes worked
+
+      const hours = Math.floor(totalMinutes / 60); // Get full hours
+      const minutes = totalMinutes % 60; // Get remaining minutes
+
+      if (hours === 0 && minutes === 0) {
+        return '0m'; // If less than a minute, show '0m'
+      } else if (hours === 0) {
+        return `${minutes}m`; // Only minutes
+      } else if (minutes === 0) {
+        return `${hours}h`; // Only hours
+      } else {
+        return `${hours}h ${minutes}m`; // Both hours and minutes
+      }
     }
-    return '0';
+    return '0h 0m'; // Default display when no times are available
   };
 
   // --- Current Date for Display ---
@@ -255,7 +266,7 @@ const DashboardEmp: React.FC = () => {
         {/* Attendance Card */}
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Total hours today</Text>
-          <Text style={styles.cardValue}>{calculateHoursWorked()} hrs</Text>
+          <Text style={styles.cardValue}>{calculateHoursWorked()}</Text> {/* Display H:M format */}
 
           <Text style={styles.timeLabel}>
             In: {checkInTime ? checkInTime.toLocaleTimeString() : '--:--'}
