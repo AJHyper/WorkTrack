@@ -22,9 +22,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getAuth } from 'firebase/auth';
 import { addDoc, collection, getDocs, query, serverTimestamp } from 'firebase/firestore';
-import { db } from '../config/firebase'; // Your Firebase instance
+import { db } from '../config/firebase';
 
-// --- Consistent Color Palette ---
 const Colors = {
   primaryBlue: '#2A72B8',
   darkBlue: '#1F558C',
@@ -34,22 +33,18 @@ const Colors = {
   black: '#212121',
   mediumGrey: '#757575',
   lightGrey: '#BDBDBD',
-  successGreen: '#4CAF50',
-  warningOrange: '#FF9800',
-  errorRed: '#F44336',
 };
 
-// Interface for user data fetched from Firestore
 interface User {
   id: string;
-  name: string; // This will be the combined firstName + lastName
-  firstName?: string; // Added for clarity
-  lastName?: string;  // Added for clarity
+  name: string;
+  firstName?: string;
+  lastName?: string;
   email?: string;
   role?: string;
 }
 
-const NewProjectScreen = () => {
+export default function NewProjectScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const auth = getAuth();
@@ -66,7 +61,6 @@ const NewProjectScreen = () => {
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [submittingProject, setSubmittingProject] = useState(false);
 
-  // Fetch ALL users from Firestore
   const fetchUsers = useCallback(async () => {
     setLoadingUsers(true);
     try {
@@ -75,13 +69,12 @@ const NewProjectScreen = () => {
       const fetchedUsers: User[] = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        // Prioritize firstName and lastName for the 'name' field
         const userName = `${data.firstName || ''} ${data.lastName || ''}`.trim();
         fetchedUsers.push({
           id: doc.id,
-          name: userName || data.email || 'Unknown User', // Fallback if names are empty
-          firstName: data.firstName, // Store for completeness
-          lastName: data.lastName,   // Store for completeness
+          name: userName || data.email || 'Unknown User',
+          firstName: data.firstName,
+          lastName: data.lastName,
           email: data.email,
           role: data.role,
         });
@@ -117,14 +110,12 @@ const NewProjectScreen = () => {
       !location.trim() ||
       selectedUsers.length === 0
     ) {
-      Alert.alert(
-        'Missing Fields',
-        'Please fill in all fields and assign at least one user.'
-      );
+      Alert.alert('Missing Fields', 'Please fill in all fields and assign at least one user.');
       return;
     }
 
     setSubmittingProject(true);
+
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) {
@@ -133,13 +124,11 @@ const NewProjectScreen = () => {
         return;
       }
 
-      // Ensure the 'name' in assignedUsers is consistent with how it's queried
       const assignedUsersData = selectedUsers.map(u => {
-        // Re-derive name from firstName/lastName if available, or use existing 'name'
         const userInList = usersList.find(user => user.id === u.id);
         const consistentName = userInList && (userInList.firstName || userInList.lastName)
           ? `${userInList.firstName || ''} ${userInList.lastName || ''}`.trim()
-          : u.name; // Fallback to existing name if firstName/lastName not found
+          : u.name;
 
         return { id: u.id, name: consistentName };
       });
@@ -150,19 +139,16 @@ const NewProjectScreen = () => {
         startDate: startDate.trim(),
         location: location.trim(),
         status: 'In Progress',
-        assignedUsers: assignedUsersData, // Use the consistently formatted names
+        assignedUsers: assignedUsersData,
         createdAt: serverTimestamp(),
         createdBy: currentUser.uid,
       };
-
-      // --- Debugging Log ---
-      console.log("Project Data being sent to Firestore:", JSON.stringify(projectData, null, 2));
-      // --- End Debugging Log ---
 
       await addDoc(collection(db, 'projects'), projectData);
 
       Alert.alert('Success', `Project "${projectName.trim()}" created successfully!`);
 
+      // Reset form
       setProjectName('');
       setDescription('');
       setStartDate('');
@@ -197,17 +183,12 @@ const NewProjectScreen = () => {
 
       <LinearGradient
         colors={[Colors.primaryBlue, Colors.darkBlue]}
-        style={styles.gradientBackground} // New style for just the gradient background
+        style={styles.gradientBackground}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
-        {/* Wrap header content in a View */}
         <View style={[styles.headerContent, { paddingTop: insets.top }]}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backButton}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.7}>
             <Feather name="arrow-left" size={28} color={Colors.white} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>New Project</Text>
@@ -241,10 +222,7 @@ const NewProjectScreen = () => {
 
         <View style={styles.inputContainer}>
           <Text style={styles.label}>Start Date</Text>
-          <TouchableOpacity
-            style={[styles.input, styles.dateInput]}
-            onPress={showDatePicker}
-          >
+          <TouchableOpacity style={[styles.input, styles.dateInput]} onPress={showDatePicker}>
             <Text style={{ color: startDate ? Colors.black : Colors.mediumGrey }}>
               {startDate || 'Select start date'}
             </Text>
@@ -291,138 +269,124 @@ const NewProjectScreen = () => {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={submittingProject}>
+        <TouchableOpacity
+          onPress={handleSubmit}
+          style={styles.button}
+          activeOpacity={0.8}
+          disabled={submittingProject}
+        >
           {submittingProject ? (
-            <ActivityIndicator color={Colors.white} />
+            <ActivityIndicator color={Colors.white} size="small" />
           ) : (
             <Text style={styles.buttonText}>Create Project</Text>
           )}
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Modal for multi-select user assignment */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
+      <Modal visible={modalVisible} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setModalVisible(false)}
+        >
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Users</Text>
+            <Text style={styles.modalTitle}>Assign Users</Text>
+
             {loadingUsers ? (
               <View style={styles.modalLoading}>
                 <ActivityIndicator size="large" color={Colors.primaryBlue} />
                 <Text style={styles.modalLoadingText}>Loading users...</Text>
               </View>
-            ) : usersList.length === 0 ? (
-              <View style={styles.modalLoading}>
-                <Feather name="alert-triangle" size={40} color={Colors.mediumGrey} />
-                <Text style={styles.modalLoadingText}>No users found.</Text>
-              </View>
             ) : (
               <FlatList
                 data={usersList}
                 keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => {
                   const selected = selectedUsers.some(u => u.id === item.id);
                   return (
                     <TouchableOpacity
-                      style={styles.employeeItem}
                       onPress={() => toggleUserSelection(item)}
+                      style={styles.employeeItem}
+                      activeOpacity={0.7}
                     >
-                      <Feather
-                        name={selected ? 'check-square' : 'square'}
-                        size={24}
-                        color={selected ? Colors.primaryBlue : Colors.mediumGrey}
-                      />
+                      <View
+                        style={[
+                          styles.checkbox,
+                          { backgroundColor: selected ? Colors.primaryBlue : Colors.lightGrey },
+                        ]}
+                      >
+                        {selected && <Feather name="check" size={18} color={Colors.white} />}
+                      </View>
                       <Text style={styles.employeeName}>{item.name}</Text>
                     </TouchableOpacity>
                   );
                 }}
               />
             )}
+
             <TouchableOpacity
               style={[styles.button, styles.modalDoneButton]}
               onPress={() => setModalVisible(false)}
+              activeOpacity={0.8}
             >
               <Text style={styles.buttonText}>Done</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: Colors.lighterBlue,
   },
-  gradientBackground: { // New style for the LinearGradient itself
-    backgroundColor: Colors.darkBlue, // Fallback color
-    ...Platform.select({ // Header shadow
-      ios: {
-        shadowColor: Colors.black,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
+  gradientBackground: {
+    paddingBottom: 12,
+    paddingHorizontal: 16,
   },
-  headerContent: { // New style for the View wrapping header elements
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    height: 60, // Fixed height for content area, insets add on top
   },
   backButton: {
-    paddingVertical: 10,
-    paddingRight: 10,
+    padding: 6,
   },
   headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
     color: Colors.white,
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    flex: 1,
   },
   rightPlaceholder: {
-    width: 28,
+    width: 34, // To balance back button size on right side
   },
   container: {
-    padding: 20,
+    padding: 16,
     paddingBottom: 40,
   },
   inputContainer: {
     marginBottom: 20,
   },
   label: {
-    fontSize: 16,
     fontWeight: '600',
-    color: Colors.darkBlue,
-    marginBottom: 8,
-  },
-  input: {
-    minHeight: 50,
-    borderColor: Colors.lightGrey,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 15,
-    backgroundColor: Colors.white,
     fontSize: 16,
     color: Colors.black,
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.black,
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 2,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: Colors.white,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 14 : 10,
+    fontSize: 16,
+    color: Colors.black,
+    borderWidth: 1,
+    borderColor: Colors.lightGrey,
   },
   dateInput: {
     flexDirection: 'row',
@@ -435,86 +399,73 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   button: {
-    backgroundColor: Colors.primaryBlue,
-    paddingVertical: 15,
+    backgroundColor:Colors.primaryBlue,
+    paddingVertical: 14,
     borderRadius: 10,
     alignItems: 'center',
-    marginTop: 20,
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.primaryBlue,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-      },
-      android: {
-        elevation: 5,
-      },
-    }),
-  },
-  buttonText: {
+    marginTop: 10,
+    shadowColor: Colors.primaryBlue,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
+    },
+    buttonText: {
     color: Colors.white,
+    fontWeight: '700',
     fontSize: 18,
-    fontWeight: 'bold',
-  },
-  modalOverlay: {
+    },
+    modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  modalContent: {
+    paddingHorizontal: 24,
+    },
+    modalContent: {
     backgroundColor: Colors.white,
-    borderRadius: 16,
-    padding: 25,
-    width: '90%',
+    borderRadius: 12,
     maxHeight: '80%',
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.black,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 10,
-      },
-    }),
-  },
-  modalTitle: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    },
+    modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: Colors.darkBlue,
-    marginBottom: 15,
+    fontWeight: '700',
+    marginBottom: 14,
+    color: Colors.primaryBlue,
     textAlign: 'center',
-  },
-  modalLoading: {
-    justifyContent: 'center',
+    },
+    modalLoading: {
     alignItems: 'center',
-    paddingVertical: 30,
-  },
-  modalLoadingText: {
+    justifyContent: 'center',
+    paddingVertical: 40,
+    },
+    modalLoadingText: {
     marginTop: 10,
     fontSize: 16,
     color: Colors.mediumGrey,
-  },
-  employeeItem: {
+    },
+    employeeItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.lighterBlue,
-  },
-  employeeName: {
+    paddingVertical: 10,
+    borderBottomColor: Colors.lightGrey,
+    borderBottomWidth: 0.5,
+    },
+    checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: Colors.lightGrey,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    },
+    employeeName: {
     fontSize: 16,
-    marginLeft: 15,
     color: Colors.black,
-  },
-  modalDoneButton: {
-    marginTop: 20,
-    backgroundColor: Colors.darkBlue,
-  }
-});
-
-export default NewProjectScreen;
+    },
+    modalDoneButton: {
+    marginTop: 12,
+    },
+    });
