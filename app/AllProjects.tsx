@@ -95,7 +95,7 @@ const AllProjectsScreen: React.FC = () => {
         const mappedTeam: TeamMember[] = (data.assignedUsers || []).map((user: any) => ({
           name: user.name || 'Unknown', // Use 'name' from assignedUsers
           role: user.role || 'Team Member', // 'role' might not be in assignedUsers, so provide a default or infer
-                                          // If 'role' is in assignedUsers, use user.role
+                                             // If 'role' is in assignedUsers, use user.role
         }));
 
         const project: Project = {
@@ -260,7 +260,14 @@ const AllProjectsScreen: React.FC = () => {
                       style={[styles.actionButton, styles.terminateButton]}
                       onPress={() => terminateProject(project.id, project.status)}
                     >
-                      <Text style={styles.actionButtonText}>Terminate</Text>
+                      <Text
+                        style={styles.actionButtonText}
+                        numberOfLines={1} // Ensure text stays on one line
+                        ellipsizeMode="tail" // Add ellipsis if text overflows
+                        minimumFontScale={0.7} // Allow font to shrink to 70% if needed
+                      >
+                        Terminate
+                      </Text>
                     </TouchableOpacity>
                   )}
 
@@ -269,7 +276,14 @@ const AllProjectsScreen: React.FC = () => {
                       style={[styles.actionButton, styles.completeButton]}
                       onPress={() => markProjectCompleted(project.id)}
                     >
-                      <Text style={styles.actionButtonText}>Mark as Completed</Text>
+                      <Text
+                        style={styles.actionButtonText}
+                        numberOfLines={1} // Ensure text stays on one line
+                        ellipsizeMode="tail" // Add ellipsis if text overflows
+                        minimumFontScale={0.7} // Allow font to shrink to 70% if needed
+                      >
+                        Mark as Completed
+                      </Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -406,11 +420,11 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.lightGrey,
   },
   actionButton: {
-    flex: 1,
+    flex: 1, // This allows the buttons to take equal space within the container
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
-    marginHorizontal: 5,
+    marginHorizontal: 5, // Provides spacing between buttons
   },
   terminateButton: {
     backgroundColor: Colors.red,
@@ -422,6 +436,8 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontWeight: 'bold',
     fontSize: 15,
+    textAlign: 'center', // Ensures text is centered within its bounds
+    // Removed flexShrink here as we're handling text scaling with minimumFontScale directly on Text component
   },
   loadingIndicator: {
     flex: 1,

@@ -1,4 +1,6 @@
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
@@ -7,6 +9,7 @@ import {
   Dimensions,
   Image,
   Platform,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -14,52 +17,58 @@ import {
   Text,
   TouchableOpacity,
   View,
-} from 'react-native';
+} from 'react-native'; // <--- Corrected this line
 
 import {
   doc,
   getDoc,
   serverTimestamp,
   setDoc,
-  Timestamp, // Ensure Timestamp is imported
+  Timestamp,
   updateDoc,
 } from 'firebase/firestore';
-import { auth, db } from '../../config/firebase'; // Ensure these are correctly imported
+import { auth, db } from '../../config/firebase';
 
 const { width, height } = Dimensions.get('window');
 
-// --- Consistent Color Palette from other Dashboard components ---
 const Colors = {
-  primaryBlue: '#2A72B8', // A deeper, more prominent blue from the logo's vibe
-  darkBlue: '#1F558C', // An even darker shade for headers/strong accents
-  lightBlue: '#C9DCEC', // A softer, light blue for backgrounds/cards
-  lighterBlue: '#EAF3FA', // Very subtle light blue for overall background
+  primaryBlue: '#2A72B8',
+  darkBlue: '#1F558C',
+  lightBlue: '#C9DCEC',
+  lighterBlue: '#EAF3FA',
   white: '#FFFFFF',
-  black: '#212121', // Dark grey for main text
-  mediumGrey: '#757575', // For secondary text
-  lightGrey: '#BDBDBD', // For borders/dividers
+  black: '#212121',
+  mediumGrey: '#757575',
+  lightGrey: '#BDBDBD',
 };
 
-const BossDashboard: React.FC = () => {
+const DashboardEmp: React.FC = () => {
   const router = useRouter();
 
   const [userId, setUserId] = useState<string | null>(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [profilePictureBase64, setProfilePictureBase64] = useState<string | null>(null);
 
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
+
   const [loading, setLoading] = useState(true);
-  const [buttonLoading, setButtonLoading] = useState(false); // For check-in/out button presses
+  const [isOperationInProgress, setIsOperationInProgress] = useState(false); // New state for overall operation
 
   const getTodayKey = () => new Date().toISOString().slice(0, 10);
 
   const formatTimeForDisplay = useCallback((date: Date | null): string => {
-    // Using ternary: If date exists, format it, otherwise return '--:--'
-    return date ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--';
+    return date
+      ? date.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        })
+      : '--:--';
   }, []);
 
+  // --- Load User and Attendance Data ---
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -71,30 +80,51 @@ const BossDashboard: React.FC = () => {
       const uid = user.uid;
       setUserId(uid);
 
-      // Load user profile
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists()) {
         const data = userDoc.data();
         setFirstName(data.firstName || '');
         setLastName(data.lastName || '');
-        setProfilePhoto(data.profilePhoto || null);
+        setProfilePictureBase64(data.profilePicture || null);
+      } else {
+        await setDoc(
+          doc(db, 'users', uid),
+          {
+            email: user.email,
+            createdAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+        setFirstName('');
+        setLastName('');
+        setProfilePictureBase64(null);
       }
 
-      // Load today's attendance
-      const attRef = doc(db, 'attendance', uid, 'daily', getTodayKey()); // Uses 'daily'
+      const attRef = doc(db, 'attendance', uid, 'daily', getTodayKey());
       const attSnap = await getDoc(attRef);
+
       if (attSnap.exists()) {
-        const data = attSnap.data();
-        // Ensure checkInTime and checkOutTime are correctly converted from Firestore Timestamps
-        setCheckInTime(data.checkInTime instanceof Timestamp ? data.checkInTime.toDate() : null);
-        setCheckOutTime(data.checkOutTime instanceof Timestamp ? data.checkOutTime.toDate() : null);
+        const { checkInTime: ci, checkOutTime: co } = attSnap.data();
+
+        let ciDate: Date | null = null;
+        if (ci instanceof Timestamp) {
+          ciDate = ci.toDate();
+        }
+
+        let coDate: Date | null = null;
+        if (co instanceof Timestamp) {
+          coDate = co.toDate();
+        }
+
+        setCheckInTime(ciDate);
+        setCheckOutTime(coDate);
       } else {
         setCheckInTime(null);
         setCheckOutTime(null);
       }
     } catch (err) {
       console.error('Error loading data:', err);
-      Alert.alert('Error', 'Failed to load data');
+      Alert.alert('Error', 'Failed to load data. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -106,138 +136,344 @@ const BossDashboard: React.FC = () => {
     }, [loadData])
   );
 
-  const handleCheckIn = async () => {
-    if (!userId) {
-      Alert.alert('Error', 'User not logged in.');
-      return;
-    }
-    if (checkInTime) {
-      Alert.alert('Already Checked In', 'You have already checked in today. You can only check in once per day.');
-      return;
-    }
-
-    setButtonLoading(true);
-
-    try {
-      // Use serverTimestamp() directly in Firestore for consistency
-      await setDoc(
-        doc(db, 'attendance', userId, 'daily', getTodayKey()), // Uses 'daily'
-        {
-          checkInTime: serverTimestamp(),
-          checkOutTime: null, // Ensure this is explicitly null for check-in
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
+  // --- Helper function to pick and upload image ---
+  const pickAndUploadImage = async () => {
+    setIsOperationInProgress(true); // Disable other buttons
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permission Denied',
+        'Sorry, we need camera roll permissions to change your profile picture!'
       );
-      Alert.alert('Success', 'Checked in successfully!');
-      // Re-load data after successful check-in to get the server's timestamp
-      await loadData();
-    } catch (err) {
-      console.error('Error saving check-in:', err);
-      Alert.alert('Error', 'Could not save check-in');
-      // On error, revert optimism by re-loading data
-      await loadData();
-    } finally {
-      setButtonLoading(false);
+      setIsOperationInProgress(false); // Re-enable if permission denied
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.3, // VERY IMPORTANT: Compress heavily to stay within Firestore 1MB limit
+      base64: true,
+    });
+
+    if (result.canceled) {
+      setIsOperationInProgress(false); // Re-enable if cancelled
+      return;
+    }
+
+    if (result.assets && result.assets.length > 0) {
+      const selectedImage = result.assets[0];
+      const base64String = selectedImage.base64;
+
+      if (!base64String) {
+        Alert.alert('Error', 'Could not get image data in Base64 format.');
+        setIsOperationInProgress(false); // Re-enable if no base64
+        return;
+      }
+
+      const dataUri = `data:image/jpeg;base64,${base64String}`; // Assuming JPEG after compression
+
+      try {
+        if (userId) {
+          const userDocRef = doc(db, 'users', userId);
+          await updateDoc(userDocRef, {
+            profilePicture: dataUri,
+            updatedAt: serverTimestamp(),
+          });
+          setProfilePictureBase64(dataUri);
+          Alert.alert('Success', 'Profile picture updated!');
+        } else {
+          Alert.alert('Error', 'User not identified. Please log in again.');
+        }
+      } catch (error: any) {
+        console.error('Error uploading profile picture:', error);
+        if (error.code === 'resource-exhausted') {
+          Alert.alert(
+            'Error',
+            'Image is too large. Please select a smaller image or reduce quality further.'
+          );
+        } else {
+          Alert.alert('Error', 'Failed to upload profile picture: ' + error.message);
+        }
+      } finally {
+        setIsOperationInProgress(false); // Re-enable buttons
+      }
+    } else {
+      setIsOperationInProgress(false); // Re-enable if no assets found
     }
   };
 
-  const handleCheckOut = async () => {
+  // --- Handle Delete Profile Picture ---
+  const handleDeleteProfilePicture = async () => {
     if (!userId) {
-      Alert.alert('Error', 'User not logged in.');
+      Alert.alert('Error', 'User not identified. Please log in again.');
+      return;
+    }
+
+    Alert.alert(
+      'Confirm Deletion',
+      'Are you sure you want to delete your profile picture?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setIsOperationInProgress(true); // Disable other buttons during deletion
+            try {
+              const userDocRef = doc(db, 'users', userId);
+              await updateDoc(userDocRef, {
+                profilePicture: null, // Set to null to remove the image
+                updatedAt: serverTimestamp(),
+              });
+              setProfilePictureBase64(null); // Update UI
+              Alert.alert('Success', 'Profile picture deleted!');
+            } catch (error) {
+              console.error('Error deleting profile picture:', error);
+              Alert.alert('Error', 'Failed to delete profile picture.');
+            } finally {
+              setIsOperationInProgress(false); // Re-enable buttons
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // --- Main handler for avatar Pressable ---
+  const handleAvatarPress = () => {
+    // Only allow avatar press if no operation is in progress
+    if (isOperationInProgress) return;
+
+    Alert.alert(
+      'Profile Picture Options',
+      'What would you like to do?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Choose New Photo',
+          onPress: pickAndUploadImage,
+        },
+        // Only show delete option if a photo exists
+        profilePictureBase64
+          ? {
+              text: 'Delete Photo',
+              onPress: handleDeleteProfilePicture,
+              style: 'destructive',
+            }
+          : {}, // Empty object for non-existent option
+      ],
+      { cancelable: true }
+    );
+  };
+
+  // --- Handle Check-In ---
+  const handleCheckIn = async () => {
+    if (isOperationInProgress) return; // Prevent multiple operations
+
+    if (!userId) {
+      Alert.alert('Error', 'User not identified. Please log in again.');
+      return;
+    }
+
+    if (checkInTime) {
+      Alert.alert(
+        'Already checked in',
+        'You have already checked in for today. Only one check-in per day is allowed.'
+      );
+      return;
+    }
+
+    setIsOperationInProgress(true); // Disable other buttons
+    const now = new Date();
+
+    try {
+      await setDoc(
+        doc(db, 'attendance', userId, 'daily', getTodayKey()),
+        {
+          checkInTime: serverTimestamp(),
+          checkOutTime: null,
+          updatedAt: serverTimestamp(),
+          employeeId: userId,
+        },
+        { merge: true }
+      );
+      setCheckInTime(now);
+      setCheckOutTime(null);
+      Alert.alert('Check-in Successful', `You checked in at ${formatTimeForDisplay(now)}.`);
+    } catch (err) {
+      console.error('Error saving check-in:', err);
+      Alert.alert('Error', 'Could not save check-in. Please try again.');
+    } finally {
+      setIsOperationInProgress(false); // Re-enable buttons
+    }
+  };
+
+  // --- Handle Check-Out ---
+  const handleCheckOut = async () => {
+    if (isOperationInProgress) return; // Prevent multiple operations
+
+    if (!userId) {
+      Alert.alert('Error', 'User not identified. Please log in again.');
       return;
     }
     if (!checkInTime) {
-      Alert.alert('Check In First', 'You must check in before checking out.');
+      Alert.alert('Check in first', 'You must check in before checking out.');
       return;
     }
     if (checkOutTime) {
-      Alert.alert('Already Checked Out', 'You have already checked out today.');
+      Alert.alert('Already checked out', 'You have already checked out for today.');
       return;
     }
 
-    setButtonLoading(true);
+    setIsOperationInProgress(true); // Disable other buttons
+    const now = new Date();
 
     try {
-      // Use serverTimestamp() directly in Firestore for consistency
       await updateDoc(
-        doc(db, 'attendance', userId, 'daily', getTodayKey()), // Uses 'daily'
+        doc(db, 'attendance', userId, 'daily', getTodayKey()),
         {
           checkOutTime: serverTimestamp(),
           updatedAt: serverTimestamp(),
         }
       );
-      Alert.alert('Success', 'Checked out successfully!');
-      // **Crucially, re-load data after successful check-out to get the server's timestamp**
-      await loadData();
+      setCheckOutTime(now);
+      Alert.alert('Check-out Successful', `You checked out at ${formatTimeForDisplay(now)}.`);
     } catch (err) {
       console.error('Error saving check-out:', err);
-      Alert.alert('Error', 'Could not save check-out');
-      // On error, re-load data to revert optimism
-      await loadData();
+      Alert.alert('Error', 'Could not save check-out. Please try again.');
     } finally {
-      setButtonLoading(false);
+      setIsOperationInProgress(false); // Re-enable buttons
     }
   };
 
+  // --- Calculate Hours Worked in H:M format ---
   const calculateHoursWorked = useCallback(() => {
-    // This calculation remains the same, as it operates on the Date objects
-    // that are correctly set by loadData after Firestore interactions.
     if (checkInTime && checkOutTime) {
-      const diff = (checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
-      return diff >= 0 ? diff.toFixed(2) : '0.00';
+      const diffMilliseconds = checkOutTime.getTime() - checkInTime.getTime();
+      const totalMinutes = Math.floor(diffMilliseconds / (1000 * 60));
+
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+
+      if (hours === 0 && minutes === 0) {
+        return '0m';
+      } else if (hours === 0) {
+        return `${minutes}m`;
+      } else if (minutes === 0) {
+        return `${hours}h`;
+      } else {
+        return `${hours}h ${minutes}m`;
+      }
     }
     if (checkInTime && !checkOutTime) {
-      const now = new Date();
-      const diff = (now.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
-      return diff >= 0 ? diff.toFixed(2) : '0.00';
+      const diffMilliseconds = new Date().getTime() - checkInTime.getTime();
+      const totalMinutes = Math.floor(diffMilliseconds / (1000 * 60));
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return `${hours}h ${minutes}m (ongoing)`;
     }
-    return '0.00';
+    return '0h 0m';
   }, [checkInTime, checkOutTime]);
 
-  const currentDate = new Date().toLocaleDateString();
+  const currentDate = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  const handleMyLogsPress = () => {
+    if (isOperationInProgress) return; // Prevent navigation during operation
+    if (userId) {
+      router.push({
+        pathname: '/IndividualAttendance',
+        params: { employeeId: userId },
+      });
+    } else {
+      Alert.alert('Error', 'User ID not available. Please log in again.');
+      router.push('/auth/Login');
+    }
+  };
+
+  // --- New handlers for the added buttons ---
+  const handleNewProjectPress = () => {
+    if (isOperationInProgress) return;
+    router.push('/NewProject');
+  };
+
+  const handleAllLogsPress = () => {
+    if (isOperationInProgress) return;
+    router.push('/EmpAttendance');
+  };
+
+  const handleAllProjectsPress = () => {
+    if (isOperationInProgress) return;
+    router.push('/AllProjects');
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.darkBlue} />
 
-      {/* Header Background (curved shape) */}
-      <View style={styles.headerBackground} />
+      <LinearGradient
+        colors={[Colors.primaryBlue, Colors.darkBlue]}
+        style={styles.headerBackground}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      />
 
-      {/* Logout Button */}
       <TouchableOpacity
         style={styles.logoutButton}
         onPress={() => {
           auth.signOut();
           router.push('/auth/Login');
         }}
+        disabled={isOperationInProgress} // Disable logout during operation
       >
         <Feather name="log-out" size={24} color={Colors.white} />
       </TouchableOpacity>
 
       <ScrollView contentContainerStyle={styles.scrollView}>
         <View style={styles.profileSection}>
-          <Image
-            source={
-              profilePhoto
-                ? { uri: profilePhoto }
-                : require('../../assets/images/Profile.png') // Ensure this path is correct
-            }
-            style={styles.avatar}
-          />
+          {/* Profile Picture Display with Options */}
+          <Pressable
+            onPress={handleAvatarPress}
+            style={styles.avatarContainer}
+            disabled={isOperationInProgress} // Disable avatar press during operation
+          >
+            {isOperationInProgress ? (
+              <ActivityIndicator size="large" color={Colors.primaryBlue} />
+            ) : profilePictureBase64 ? (
+              <Image source={{ uri: profilePictureBase64 }} style={styles.profileImage} />
+            ) : (
+              <View style={styles.defaultAvatar}>
+                <Feather name="user" size={width * 0.25} color={Colors.primaryBlue} />
+              </View>
+            )}
+            <View style={styles.editIconContainer}>
+              <Feather name="edit-2" size={18} color={Colors.white} />
+            </View>
+          </Pressable>
+
           <Text style={styles.name}>
             {firstName} {lastName}
           </Text>
         </View>
 
-        {/* Attendance Card */}
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Total hours today</Text>
-          {/* Ternary for conditional rendering of ActivityIndicator or Text */}
-          {loading ? (
-            <ActivityIndicator size="large" color={Colors.primaryBlue} style={{ marginVertical: 10 }} />
+          {loading && !checkInTime && !checkOutTime ? (
+            <ActivityIndicator size="large" color={Colors.primaryBlue} style={{ marginVertical: 12 }} />
           ) : (
-            <Text style={styles.cardValue}>{calculateHoursWorked()} hrs</Text>
+            <Text style={styles.cardValue}>{calculateHoursWorked()}</Text>
           )}
 
           <Text style={styles.timeLabel}>
@@ -249,79 +485,97 @@ const BossDashboard: React.FC = () => {
 
           <View style={styles.buttonRow}>
             <TouchableOpacity
-              style={[styles.checkInButton, (buttonLoading || checkInTime) && styles.disabledButton]}
+              style={[
+                styles.checkInButton,
+                (isOperationInProgress || !!checkInTime) && { opacity: 0.6 }, // Disable if any operation is in progress or already checked in
+              ]}
               onPress={handleCheckIn}
-              disabled={buttonLoading || !!checkInTime}
+              disabled={isOperationInProgress || !!checkInTime} // Disable if any operation is in progress or already checked in
             >
-              {/* Ternary for conditional rendering of ActivityIndicator or Text */}
-              {buttonLoading && !checkInTime ? (
-                <ActivityIndicator color={Colors.white} />
-              ) : (
-                <Text style={styles.buttonText}>Check In</Text>
-              )}
+              <Text style={styles.buttonText}>
+                {isOperationInProgress && !checkInTime ? ( // Show activity indicator only for check-in during operation
+                  <ActivityIndicator color={Colors.white} />
+                ) : (
+                  'Check In'
+                )}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.checkOutButton, (buttonLoading || !checkInTime || checkOutTime) && styles.disabledButton]}
+              style={[
+                styles.checkOutButton,
+                (isOperationInProgress || !checkInTime || !!checkOutTime) && { opacity: 0.6 }, // Disable if any operation is in progress or not checked in or already checked out
+              ]}
               onPress={handleCheckOut}
-              disabled={buttonLoading || !checkInTime || !!checkOutTime}
+              disabled={isOperationInProgress || !checkInTime || !!checkOutTime} // Disable if any operation is in progress or not checked in or already checked out
             >
-              {/* Ternary for conditional rendering of ActivityIndicator or Text */}
-              {buttonLoading && checkInTime && !checkOutTime ? (
-                <ActivityIndicator color={Colors.primaryBlue} />
-              ) : (
-                <Text style={styles.buttonTextCheckOut}>Check Out</Text>
-              )}
+              <Text style={styles.buttonTextCheckOut}>
+                {isOperationInProgress && checkInTime && !checkOutTime ? ( // Show activity indicator only for check-out during operation
+                  <ActivityIndicator color={Colors.primaryBlue} />
+                ) : (
+                  'Check Out'
+                )}
+              </Text>
             </TouchableOpacity>
           </View>
 
           <Text style={styles.cardDate}>Date: {currentDate}</Text>
         </View>
 
-        {/* Explore Section */}
         <Text style={styles.exploreTitle}>Explore</Text>
         <View style={styles.exploreGrid}>
           <TouchableOpacity
-            style={styles.exploreTile}
+            style={[styles.exploreTile, isOperationInProgress && { opacity: 0.6 }]}
             onPress={() => router.push('/Profile')}
+            disabled={isOperationInProgress}
           >
             <Feather name="user" size={24} color={Colors.darkBlue} />
             <Text style={styles.exploreLabel}>Profile</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
-            style={styles.exploreTile}
-            onPress={() => router.push('/IndividualAttendance')}
+            style={[styles.exploreTile, isOperationInProgress && { opacity: 0.6 }]}
+            onPress={handleMyLogsPress}
+            disabled={isOperationInProgress}
           >
             <Feather name="calendar" size={24} color={Colors.darkBlue} />
             <Text style={styles.exploreLabel}>My Logs</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
-            style={styles.exploreTile}
+            style={[styles.exploreTile, isOperationInProgress && { opacity: 0.6 }]}
             onPress={() => router.push('/ProjectDetails')}
+            disabled={isOperationInProgress}
           >
             <Feather name="briefcase" size={24} color={Colors.darkBlue} />
             <Text style={styles.exploreLabel}>Tasks</Text>
           </TouchableOpacity>
-          {/* New buttons added below */}
+
+          {/* New Buttons */}
           <TouchableOpacity
-            style={styles.exploreTile}
-            onPress={() => router.push('/NewProject')}
+            style={[styles.exploreTile, isOperationInProgress && { opacity: 0.6 }]}
+            onPress={handleNewProjectPress}
+            disabled={isOperationInProgress}
           >
             <Feather name="plus-circle" size={24} color={Colors.darkBlue} />
             <Text style={styles.exploreLabel}>New Project</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
-            style={styles.exploreTile}
-            onPress={() => router.push('/EmpAttendance')}
+            style={[styles.exploreTile, isOperationInProgress && { opacity: 0.6 }]}
+            onPress={handleAllLogsPress}
+            disabled={isOperationInProgress}
           >
-            <Feather name="users" size={24} color={Colors.darkBlue} />
-            <Text style={styles.exploreLabel}>Team Logs</Text>
+            <Feather name="list" size={24} color={Colors.darkBlue} />
+            <Text style={styles.exploreLabel}>All Logs</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
-            style={styles.exploreTile}
-            onPress={() => router.push('/AllProjects')}
+            style={[styles.exploreTile, isOperationInProgress && { opacity: 0.6 }]}
+            onPress={handleAllProjectsPress}
+            disabled={isOperationInProgress}
           >
-            <Feather name="layers" size={24} color={Colors.darkBlue} />
+            <Feather name="folder" size={24} color={Colors.darkBlue} />
             <Text style={styles.exploreLabel}>All Projects</Text>
           </TouchableOpacity>
         </View>
@@ -331,34 +585,16 @@ const BossDashboard: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.lighterBlue, // Consistent background color
-  },
-  scrollView: {
-    alignItems: 'center',
-    paddingBottom: 40,
-  },
+  container: { flex: 1, backgroundColor: Colors.lighterBlue },
+  scrollView: { alignItems: 'center', paddingBottom: 40 },
   headerBackground: {
     position: 'absolute',
     width: width * 1.2,
     height: height * 0.45,
     borderBottomLeftRadius: width,
     borderBottomRightRadius: width,
-    backgroundColor: Colors.darkBlue, // Use dark blue for the curved header
     top: 0,
     left: -width * 0.1,
-    ...Platform.select({ // Add shadow to the header background
-      ios: {
-        shadowColor: Colors.black,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 6,
-      },
-      android: {
-        elevation: 8,
-      },
-    }),
   },
   logoutButton: {
     position: 'absolute',
@@ -368,54 +604,68 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    // Add subtle shadow to the button itself for pop
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.black,
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.2,
-        shadowRadius: 2,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
   },
-  profileSection: { marginTop: height * 0.07, alignItems: 'center' },
-  avatar: {
-    width: width * 0.5,
-    height: width * 0.5,
-    borderRadius: width * 0.25,
-    borderWidth: 3, // Slightly thicker border
-    borderColor: Colors.white, // White border for contrast
-    backgroundColor: Colors.white, // Fallback background for image
-    // Add shadow to avatar for depth
+  profileSection: {
+    marginTop: height * 0.07,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  avatarContainer: {
+    width: width * 0.4,
+    height: width * 0.4,
+    borderRadius: width * 0.2,
+    backgroundColor: Colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
     ...Platform.select({
       ios: {
         shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
+        shadowOpacity: 0.1,
         shadowRadius: 6,
       },
       android: {
-        elevation: 8,
+        elevation: 6,
       },
     }),
   },
+  profileImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: width * 0.2,
+    resizeMode: 'cover',
+  },
+  defaultAvatar: {
+    width: '100%',
+    height: '100%',
+    borderRadius: width * 0.2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  editIconContainer: {
+    position: 'absolute',
+    bottom: 5,
+    right: 5,
+    backgroundColor: Colors.primaryBlue,
+    borderRadius: 15,
+    padding: 6,
+    zIndex: 1,
+  },
   name: {
-    marginTop: 12,
+    marginTop: 0,
     fontSize: width * 0.07,
-    color: Colors.white, // White text for name
+    color: Colors.white,
     fontWeight: 'bold',
   },
   card: {
-    backgroundColor: Colors.white, // White background for the card
-    borderRadius: 16, // Consistent rounded corners
-    padding: 20,
+    backgroundColor: Colors.white,
+    borderRadius: 20,
+    padding: 24,
     marginTop: 20,
-    width: width * 0.9, // Adjusted width for consistency
+    width: width * 0.9,
     alignItems: 'center',
-    ...Platform.select({ // Add shadow for depth
+    ...Platform.select({
       ios: {
         shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 4 },
@@ -427,34 +677,30 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  cardLabel: {
-    fontSize: 15, // Slightly smaller font
-    color: Colors.mediumGrey, // Medium grey for labels
-  },
+  cardLabel: { fontSize: 16, color: Colors.mediumGrey, marginBottom: 4 },
   cardValue: {
-    fontSize: 26, // Larger and more prominent
+    fontSize: 28,
     fontWeight: 'bold',
-    color: Colors.primaryBlue, // Primary blue for the main value
-    marginVertical: 10,
+    color: Colors.black,
+    marginVertical: 12,
   },
-  timeLabel: {
-    fontSize: 15, // Consistent font size
-    color: Colors.black, // Dark text for times
-  },
+  timeLabel: { fontSize: 15, color: Colors.black, marginVertical: 4 },
   buttonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    marginVertical: 15, // Increased vertical margin
+    marginTop: 20,
+    marginBottom: 10,
   },
   checkInButton: {
-    backgroundColor: Colors.primaryBlue, // Primary blue for check-in
-    paddingVertical: 14, // Consistent padding
-    borderRadius: 10, // Consistent rounded corners
+    backgroundColor: Colors.primaryBlue,
+    paddingVertical: 16,
+    borderRadius: 12,
     flex: 1,
-    marginRight: 8, // Increased margin
+    marginRight: 8,
+    justifyContent: 'center',
     alignItems: 'center',
-    ...Platform.select({ // Add shadow to button
+    ...Platform.select({
       ios: {
         shadowColor: Colors.primaryBlue,
         shadowOffset: { width: 0, height: 2 },
@@ -467,73 +713,46 @@ const styles = StyleSheet.create({
     }),
   },
   checkOutButton: {
-    backgroundColor: Colors.lightBlue, // Light blue for check-out
-    paddingVertical: 14, // Consistent padding
-    borderRadius: 10, // Consistent rounded corners
+    backgroundColor: Colors.lightBlue,
+    paddingVertical: 16,
+    borderRadius: 12,
     flex: 1,
-    marginLeft: 8, // Increased margin
+    marginLeft: 8,
+    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1, // Add border for visual separation
-    borderColor: Colors.primaryBlue, // Primary blue border for check-out button
-    ...Platform.select({ // Add shadow to button
-      ios: {
-        shadowColor: Colors.lightBlue, // Use light blue for shadow
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
+    borderWidth: 1,
+    borderColor: Colors.primaryBlue,
   },
-  buttonText: {
-    color: Colors.white,
-    fontSize: 16,
-    fontWeight: '600', // Semibold
-    textAlign: 'center',
-  },
-  buttonTextCheckOut: {
-    color: Colors.primaryBlue, // Primary blue text for check-out button
-    fontSize: 16,
-    fontWeight: '600', // Semibold
-    textAlign: 'center',
-  },
-  disabledButton: {
-    opacity: 0.6, // Slightly more opaque for disabled state
-  },
-  cardDate: {
-    marginTop: 8,
-    fontSize: 14,
-    color: Colors.mediumGrey, // Medium grey for date
-  },
+  buttonText: { color: Colors.white, fontSize: 17, textAlign: 'center', fontWeight: '600' },
+  buttonTextCheckOut: { color: Colors.primaryBlue, fontSize: 17, textAlign: 'center', fontWeight: '600' },
+  cardDate: { marginTop: 12, fontSize: 15, color: Colors.mediumGrey },
   exploreTitle: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
-    marginVertical: 25, // Increased vertical margin
-    color: Colors.darkBlue, // Dark blue for title
-    alignSelf: 'flex-start', // Align to left
-    marginLeft: width * 0.05, // Match card alignment
+    marginVertical: 25,
+    color: Colors.darkBlue,
+    alignSelf: 'flex-start',
+    marginLeft: width * 0.05,
   },
   exploreGrid: {
     flexDirection: 'row',
-    width: width * 0.9, // Consistent width
-    justifyContent: 'space-between',
+    width: width * 0.9,
+    justifyContent: 'space-around',
     marginBottom: 20,
     flexWrap: 'wrap',
   },
   exploreTile: {
-    width: '31%', // Adjusted width to fit 3 tiles with spacing
-    backgroundColor: Colors.white, // White background for tiles
-    borderRadius: 12, // Consistent rounded corners
-    padding: 18, // Slightly reduced padding
+    width: '30%', // Adjust width if you want more items per row or different spacing
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 15,
     alignItems: 'center',
-    marginBottom: 15, // Consistent spacing
-    ...Platform.select({ // Add shadow
+    marginBottom: 15, // Added margin for spacing between rows
+    ...Platform.select({
       ios: {
         shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.08,
         shadowRadius: 4,
       },
       android: {
@@ -542,12 +761,12 @@ const styles = StyleSheet.create({
     }),
   },
   exploreLabel: {
-    marginTop: 10,
-    fontSize: 13, // Slightly smaller font for labels
-    fontWeight: '600', // Semibold
-    color: Colors.darkBlue, // Dark blue for labels
-    textAlign: 'center', // Center text
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.darkBlue,
+    textAlign: 'center',
   },
 });
 
-export default BossDashboard;
+export default DashboardEmp;

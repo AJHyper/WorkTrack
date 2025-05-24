@@ -1,4 +1,4 @@
-import { auth } from '@/config/firebase';
+import { auth } from '@/config/firebase'; // Only need 'auth' here
 import { Buffer } from 'buffer';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
@@ -8,6 +8,8 @@ import {
   StyleSheet,
   View
 } from 'react-native';
+
+// Polyfill for Buffer, necessary in some React Native environments
 global.Buffer = global.Buffer || Buffer;
 
 const { width, height } = Dimensions.get('window');
@@ -54,22 +56,24 @@ const Loading = () => {
       ),
     ]).start();
 
+    // After animation, check auth status and navigate based on hierarchy
     const timer = setTimeout(() => {
       const user = auth.currentUser;
 
-      if (user?.email) {
-        if (user.email === 'alfredjokelin123@gmail.com') {
-          router.replace('/auth/DashboardEmp');
+      if (user?.email) { // Check if user is logged in and has an email
+        if (user.email === 'joklynthomas@gmail.com') {
+          router.replace('/auth/BossDashboard'); // Route to Boss Dashboard
         } else {
-          router.replace('/auth/BossDashboard');
+          router.replace('/auth/DashboardEmp'); // Route to Employee Dashboard for other emails
         }
       } else {
+        // If no user is logged in or email is missing, navigate to the login screen
         router.replace('/auth/Login');
       }
-    }, 2500);
+    }, 2500); // 2.5 seconds delay
 
-    return () => clearTimeout(timer);
-  }, [logoOpacity, logoScale, router, textOpacity]);
+    return () => clearTimeout(timer); // Cleanup the timer on component unmount
+  }, [logoOpacity, logoScale, router, textOpacity]); // Dependencies for useEffect
 
   return (
     <View style={styles.container}>

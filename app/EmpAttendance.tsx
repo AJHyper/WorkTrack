@@ -6,7 +6,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   FlatList,
   Platform,
   SafeAreaView,
@@ -15,7 +14,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,8 +27,6 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-
-const { width } = Dimensions.get('window');
 
 const Colors = {
   primaryBlue: '#2A72B8',
@@ -71,7 +68,6 @@ const EmpAttendance: React.FC = () => {
   const formatDateForDisplay = (date: Date) => {
     const day = date.getDate().toString().padStart(2, '0');
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    // MODIFIED: Get last two digits of the year
     const year = date.getFullYear().toString().slice(-2);
     return `${day}-${month}-${year}`;
   };
@@ -160,7 +156,7 @@ const EmpAttendance: React.FC = () => {
 
         fetchedAttendance.push({
           id: employee.uid,
-          date: formatDateForDisplay(selectedDate),
+          date: formatDateForDisplay(selectedDate), // Still needed internally for fetching, but hidden in UI
           day: dayOfWeek,
           name: `${employee.firstName} ${employee.lastName}`.trim(),
           status: status,
@@ -212,19 +208,22 @@ const EmpAttendance: React.FC = () => {
 
   const renderItem = ({ item }: { item: AttendanceItem }) => (
     <View style={styles.dataRow}>
-      <Text style={[styles.dataText, styles.columnDate]}>{item.date}</Text>
-      <Text style={[styles.dataText, styles.columnDay]}>{item.day.slice(0, 3)}</Text>
-      <Text style={[styles.dataText, styles.columnName]}>{item.name}</Text>
-      <Text
-        style={[
-          styles.dataText,
-          styles.columnStatus,
-          { color: item.status === 'Present' ? Colors.primaryBlue : Colors.mediumGrey },
-        ]}
-      >
-        {item.status}
-      </Text>
-      <Text style={[styles.dataText, styles.columnHours]}>{item.hours}</Text>
+      {/* Date column is effectively hidden by styling */}
+      <Text style={[styles.dataText, styles.columnDate]}></Text>
+      {item.day ? <Text style={[styles.dataText, styles.columnDay]}>{item.day.slice(0, 3)}</Text> : null}
+      {item.name ? <Text style={[styles.dataText, styles.columnName]}>{item.name}</Text> : null}
+      {item.status ? (
+        <Text
+          style={[
+            styles.dataText,
+            styles.columnStatus,
+            { color: item.status === 'Present' ? Colors.primaryBlue : Colors.mediumGrey },
+          ]}
+        >
+          {item.status}
+        </Text>
+      ) : null}
+      {item.hours ? <Text style={[styles.dataText, styles.columnHours]}>{item.hours}</Text> : null}
     </View>
   );
 
@@ -277,9 +276,10 @@ const EmpAttendance: React.FC = () => {
           </View>
 
           <View style={styles.tableHeader}>
-            <Text style={[styles.headerText, styles.columnDate]}>Date</Text>
+            {/* Hidden Date Header */}
+            <Text style={[styles.headerText, styles.columnDate]}></Text>
             <Text style={[styles.headerText, styles.columnDay]}>Day</Text>
-            <Text style={[styles.headerText, styles.columnName]}>Name</Text>
+            <Text style={[styles.headerText, styles.columnNameHeader]}>Name</Text> {/* New style for header name */}
             <Text style={[styles.headerText, styles.columnStatus]}>Status</Text>
             <Text style={[styles.headerText, styles.columnHours]}>Hours</Text>
           </View>
@@ -423,7 +423,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 13,
     color: Colors.white,
-    textAlign: 'center',
   },
   dataRow: {
     flexDirection: 'row',
@@ -451,21 +450,30 @@ const styles = StyleSheet.create({
     textAlign: 'left',
   },
   columnDate: {
-    flex: 2,
+    width: 0, // Effectively hides the column
+    marginHorizontal: 0, // Removes any horizontal margin
   },
   columnDay: {
-    flex: 1.5,
+    flex: 1,
+    textAlign: 'center',
   },
   columnName: {
-    flex: 3,
+    flex: 2,
+    paddingLeft: 5, // Consistent padding
+    textAlign: 'left', // Ensure alignment
+  },
+  columnNameHeader: {
+    flex: 2,
+    paddingLeft: 5, // Match padding of data rows for perfect alignment
+    textAlign: 'left', // Ensure it aligns with data rows
   },
   columnStatus: {
-    flex: 2,
+    flex: 1.5,
     textAlign: 'center',
     fontWeight: '600',
   },
   columnHours: {
-    flex: 1.5,
+    flex: 1,
     textAlign: 'right',
     fontWeight: '600',
   },
