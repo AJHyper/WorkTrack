@@ -21,6 +21,7 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
+  Timestamp, // Import Timestamp for checking type
   updateDoc,
 } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
@@ -29,14 +30,14 @@ const { width, height } = Dimensions.get('window');
 
 // --- Updated Color Palette to better match the logo's blue ---
 const Colors = {
-  primaryBlue: '#2A72B8', // A deeper, more prominent blue from the logo's vibe
-  darkBlue: '#1F558C', // An even darker shade for headers/strong accents
-  lightBlue: '#C9DCEC', // A softer, light blue for backgrounds/cards
-  lighterBlue: '#EAF3FA', // Very subtle light blue for overall background
+  primaryBlue: '#2A72B8',
+  darkBlue: '#1F558C',
+  lightBlue: '#C9DCEC',
+  lighterBlue: '#EAF3FA',
   white: '#FFFFFF',
-  black: '#212121', // Dark grey for main text
-  mediumGrey: '#757575', // For secondary text
-  lightGrey: '#BDBDBD', // For borders/dividers
+  black: '#212121',
+  mediumGrey: '#757575',
+  lightGrey: '#BDBDBD',
 };
 
 const DashboardEmp: React.FC = () => {
@@ -47,12 +48,17 @@ const DashboardEmp: React.FC = () => {
   const [lastName, setLastName] = useState('');
 
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
-  const [checkOutTime, setCheckOutTime] = useState<Date | null>(null); // Now correctly managed in state
+  const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
 
   const [loading, setLoading] = useState(true);
 
   // Helper to get today's date in YYYY-MM-DD format
   const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+  // --- Format time for display ---
+  const formatTimeForDisplay = useCallback((date: Date | null): string => {
+    return date ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--';
+  }, []);
 
   // --- Load User and Attendance Data ---
   const loadData = useCallback(async () => {
@@ -60,7 +66,6 @@ const DashboardEmp: React.FC = () => {
     try {
       const user = auth.currentUser;
       if (!user) {
-        // If no user, redirect to login
         router.push('/auth/Login');
         return;
       }
@@ -74,7 +79,7 @@ const DashboardEmp: React.FC = () => {
         setFirstName(data.firstName || '');
         setLastName(data.lastName || '');
       } else {
-        // Create a basic user document if it doesn't exist
+        // If user document doesn't exist, create a basic one
         await setDoc(
           doc(db, 'users', uid),
           {
@@ -87,15 +92,27 @@ const DashboardEmp: React.FC = () => {
         setLastName('');
       }
 
-      // Fetch today's attendance record
-      const attRef = doc(db, 'attendance', uid, 'dailyRecords', getTodayKey());
+      // Fetch today's attendance record from the 'daily' subcollection
+      const attRef = doc(db, 'attendance', uid, 'daily', getTodayKey());
       const attSnap = await getDoc(attRef);
+
       if (attSnap.exists()) {
         const { checkInTime: ci, checkOutTime: co } = attSnap.data();
-        setCheckInTime(ci ? new Date(ci) : null);
-        setCheckOutTime(co ? new Date(co) : null); // Correctly set checkOutTime from Firestore
+
+        // Safely convert Timestamp to Date object
+        let ciDate: Date | null = null;
+        if (ci instanceof Timestamp) {
+            ciDate = ci.toDate();
+        }
+
+        let coDate: Date | null = null;
+        if (co instanceof Timestamp) {
+            coDate = co.toDate();
+        }
+
+        setCheckInTime(ciDate);
+        setCheckOutTime(coDate);
       } else {
-        // Reset times if no record found for today
         setCheckInTime(null);
         setCheckOutTime(null);
       }
@@ -105,9 +122,9 @@ const DashboardEmp: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [router]); // Added router to the dependency array
+  }, [router]);
 
-  // Effect to load data when the screen comes into focus
+  // Use useFocusEffect to reload data when the screen comes into focus
   useFocusEffect(
     useCallback(() => {
       loadData();
@@ -121,33 +138,34 @@ const DashboardEmp: React.FC = () => {
       return;
     }
 
-    // Prevent re-checking in if already checked in and not checked out
-    if (checkInTime && !checkOutTime) {
-      Alert.alert('Already checked in', 'You have already checked in for today.');
+    // THIS IS THE CRUCIAL CHANGE: If a check-in time exists for today, prevent further check-ins.
+    if (checkInTime) {
+      Alert.alert('Already checked in', 'You have already checked in for today. Only one check-in per day is allowed.');
       return;
     }
 
-    const now = new Date();
-    setCheckInTime(now); // Optimistically update UI
-    setCheckOutTime(null); // Ensure checkOutTime is reset for a new check-in
+    setLoading(true); // Indicate that a button action is loading
+    const now = new Date(); // This `now` is for optimistic UI update and alert message only
 
     try {
       await setDoc(
-        doc(db, 'attendance', userId, 'dailyRecords', getTodayKey()),
+        doc(db, 'attendance', userId, 'daily', getTodayKey()),
         {
-          checkInTime: now.toISOString(),
-          checkOutTime: null, // Explicitly set checkOutTime to null on check-in
+          checkInTime: serverTimestamp(), // Use serverTimestamp for accuracy
+          checkOutTime: null, // Ensure this is explicitly null for a new check-in
           updatedAt: serverTimestamp(),
           employeeId: userId,
         },
         { merge: true } // Use merge to avoid overwriting other fields if they exist
       );
-      Alert.alert('Check-in Successful', `You checked in at ${now.toLocaleTimeString()}.`);
+      setCheckInTime(now); // Optimistically update UI with local time for immediate feedback
+      setCheckOutTime(null); // Ensure checkOutTime is reset for a new check-in
+      Alert.alert('Check-in Successful', `You checked in at ${formatTimeForDisplay(now)}.`);
     } catch (err) {
       console.error('Error saving check-in:', err);
       Alert.alert('Error', 'Could not save check-in. Please try again.');
-      setCheckInTime(null); // Revert state on error
-      setCheckOutTime(null); // Revert state on error
+    } finally {
+      setLoading(false); // End loading indication
     }
   };
 
@@ -161,54 +179,62 @@ const DashboardEmp: React.FC = () => {
       Alert.alert('Check in first', 'You must check in before checking out.');
       return;
     }
-    // Prevent re-checking out if already checked out
     if (checkOutTime) {
       Alert.alert('Already checked out', 'You have already checked out for today.');
       return;
     }
 
-    const now = new Date();
+    setLoading(true); // Indicate that a button action is loading
+    const now = new Date(); // This `now` is for optimistic UI update and alert message only
 
     try {
       await updateDoc(
-        doc(db, 'attendance', userId, 'dailyRecords', getTodayKey()),
+        doc(db, 'attendance', userId, 'daily', getTodayKey()),
         {
-          checkOutTime: now.toISOString(),
+          checkOutTime: serverTimestamp(), // Use serverTimestamp for accuracy
           updatedAt: serverTimestamp(),
         }
       );
-      setCheckOutTime(now); // Correctly update local state after successful Firestore write
-      Alert.alert('Check-out Successful', `You checked out at ${now.toLocaleTimeString()}.`);
+      setCheckOutTime(now); // Optimistically update UI with local time for immediate feedback
+      Alert.alert('Check-out Successful', `You checked out at ${formatTimeForDisplay(now)}.`);
     } catch (err) {
       console.error('Error saving check-out:', err);
       Alert.alert('Error', 'Could not save check-out. Please try again.');
-      // If there's an error, the local state naturally won't have been updated, so no revert needed
+    } finally {
+      setLoading(false); // End loading indication
     }
   };
 
   // --- Calculate Hours Worked in H:M format ---
-  const calculateHoursWorked = () => {
+  const calculateHoursWorked = useCallback(() => {
     if (checkInTime && checkOutTime) {
       const diffMilliseconds = checkOutTime.getTime() - checkInTime.getTime();
-      const totalMinutes = Math.floor(diffMilliseconds / (1000 * 60)); // Total minutes worked
+      const totalMinutes = Math.floor(diffMilliseconds / (1000 * 60));
 
-      const hours = Math.floor(totalMinutes / 60); // Get full hours
-      const minutes = totalMinutes % 60; // Get remaining minutes
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
 
       if (hours === 0 && minutes === 0) {
-        return '0m'; // If less than a minute, show '0m'
+        return '0m';
       } else if (hours === 0) {
-        return `${minutes}m`; // Only minutes
+        return `${minutes}m`;
       } else if (minutes === 0) {
-        return `${hours}h`; // Only hours
+        return `${hours}h`;
       } else {
-        return `${hours}h ${minutes}m`; // Both hours and minutes
+        return `${hours}h ${minutes}m`;
       }
     }
-    return '0h 0m'; // Default display when no times are available
-  };
+    // If checked in but not out, show current duration
+    if (checkInTime && !checkOutTime) {
+      const diffMilliseconds = new Date().getTime() - checkInTime.getTime();
+      const totalMinutes = Math.floor(diffMilliseconds / (1000 * 60));
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return `${hours}h ${minutes}m (ongoing)`;
+    }
+    return '0h 0m';
+  }, [checkInTime, checkOutTime]);
 
-  // --- Current Date for Display ---
   const currentDate = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     year: 'numeric',
@@ -216,7 +242,6 @@ const DashboardEmp: React.FC = () => {
     day: 'numeric',
   });
 
-  // --- Navigate to My Logs ---
   const handleMyLogsPress = () => {
     if (userId) {
       router.push({
@@ -233,7 +258,6 @@ const DashboardEmp: React.FC = () => {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.darkBlue} />
 
-      {/* Header Background Gradient */}
       <LinearGradient
         colors={[Colors.primaryBlue, Colors.darkBlue]}
         style={styles.headerBackground}
@@ -241,7 +265,6 @@ const DashboardEmp: React.FC = () => {
         end={{ x: 1, y: 1 }}
       />
 
-      {/* Logout Button */}
       <TouchableOpacity
         style={styles.logoutButton}
         onPress={() => {
@@ -253,7 +276,6 @@ const DashboardEmp: React.FC = () => {
       </TouchableOpacity>
 
       <ScrollView contentContainerStyle={styles.scrollView}>
-        {/* Profile Section */}
         <View style={styles.profileSection}>
           <View style={styles.defaultAvatar}>
             <Feather name="user" size={width * 0.25} color={Colors.primaryBlue} />
@@ -263,44 +285,45 @@ const DashboardEmp: React.FC = () => {
           </Text>
         </View>
 
-        {/* Attendance Card */}
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Total hours today</Text>
-          <Text style={styles.cardValue}>{calculateHoursWorked()}</Text> {/* Display H:M format */}
+          {loading && !checkInTime && !checkOutTime ? ( // Only show loading on initial data fetch
+            <ActivityIndicator size="large" color={Colors.primaryBlue} style={{ marginVertical: 12 }} />
+          ) : (
+            <Text style={styles.cardValue}>{calculateHoursWorked()}</Text>
+          )}
 
           <Text style={styles.timeLabel}>
-            In: {checkInTime ? checkInTime.toLocaleTimeString() : '--:--'}
+            In: {formatTimeForDisplay(checkInTime)}
           </Text>
           <Text style={styles.timeLabel}>
-            Out: {checkOutTime ? checkOutTime.toLocaleTimeString() : '--:--'}
+            Out: {formatTimeForDisplay(checkOutTime)}
           </Text>
 
           <View style={styles.buttonRow}>
-            {/* Check In Button */}
             <TouchableOpacity
               style={[
                 styles.checkInButton,
-                (checkInTime && !checkOutTime) && { opacity: 0.6 } // Disable if already checked in and not checked out
+                (loading || !!checkInTime) && { opacity: 0.6 } // Disable if loading or if checkInTime exists
               ]}
               onPress={handleCheckIn}
-              disabled={loading || (!!checkInTime && !checkOutTime)}
+              disabled={loading || !!checkInTime} // Disable if loading or if checkInTime exists
             >
               <Text style={styles.buttonText}>
-                {loading ? <ActivityIndicator color={Colors.white} /> : 'Check In'}
+                {loading && !checkInTime ? <ActivityIndicator color={Colors.white} /> : 'Check In'}
               </Text>
             </TouchableOpacity>
 
-            {/* Check Out Button */}
             <TouchableOpacity
               style={[
                 styles.checkOutButton,
-                (loading || !checkInTime || !!checkOutTime) && { opacity: 0.6 } // Disable if loading, not checked in, or already checked out
+                (loading || !checkInTime || !!checkOutTime) && { opacity: 0.6 }
               ]}
               onPress={handleCheckOut}
               disabled={loading || !checkInTime || !!checkOutTime}
             >
               <Text style={styles.buttonTextCheckOut}>
-                {loading ? <ActivityIndicator color={Colors.primaryBlue} /> : 'Check Out'}
+                {loading && checkInTime && !checkOutTime ? <ActivityIndicator color={Colors.primaryBlue} /> : 'Check Out'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -308,7 +331,6 @@ const DashboardEmp: React.FC = () => {
           <Text style={styles.cardDate}>Date: {currentDate}</Text>
         </View>
 
-        {/* Explore Section */}
         <Text style={styles.exploreTitle}>Explore</Text>
         <View style={styles.exploreGrid}>
           <TouchableOpacity

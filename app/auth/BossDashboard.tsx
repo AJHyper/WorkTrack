@@ -21,7 +21,7 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
-  Timestamp,
+  Timestamp, // Ensure Timestamp is imported
   updateDoc,
 } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase'; // Ensure these are correctly imported
@@ -30,14 +30,14 @@ const { width, height } = Dimensions.get('window');
 
 // --- Consistent Color Palette from other Dashboard components ---
 const Colors = {
-  primaryBlue: '#2A72B8',      // A deeper, more prominent blue from the logo's vibe
-  darkBlue: '#1F558C',         // An even darker shade for headers/strong accents
-  lightBlue: '#C9DCEC',        // A softer, light blue for backgrounds/cards
-  lighterBlue: '#EAF3FA',      // Very subtle light blue for overall background
+  primaryBlue: '#2A72B8', // A deeper, more prominent blue from the logo's vibe
+  darkBlue: '#1F558C', // An even darker shade for headers/strong accents
+  lightBlue: '#C9DCEC', // A softer, light blue for backgrounds/cards
+  lighterBlue: '#EAF3FA', // Very subtle light blue for overall background
   white: '#FFFFFF',
-  black: '#212121',            // Dark grey for main text
-  mediumGrey: '#757575',       // For secondary text
-  lightGrey: '#BDBDBD',        // For borders/dividers
+  black: '#212121', // Dark grey for main text
+  mediumGrey: '#757575', // For secondary text
+  lightGrey: '#BDBDBD', // For borders/dividers
 };
 
 const BossDashboard: React.FC = () => {
@@ -56,8 +56,8 @@ const BossDashboard: React.FC = () => {
   const getTodayKey = () => new Date().toISOString().slice(0, 10);
 
   const formatTimeForDisplay = useCallback((date: Date | null): string => {
-    if (!date) return '--:--';
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    // Using ternary: If date exists, format it, otherwise return '--:--'
+    return date ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--';
   }, []);
 
   const loadData = useCallback(async () => {
@@ -81,10 +81,11 @@ const BossDashboard: React.FC = () => {
       }
 
       // Load today's attendance
-      const attRef = doc(db, 'attendance', uid, 'daily', getTodayKey());
+      const attRef = doc(db, 'attendance', uid, 'daily', getTodayKey()); // Uses 'daily'
       const attSnap = await getDoc(attRef);
       if (attSnap.exists()) {
         const data = attSnap.data();
+        // Ensure checkInTime and checkOutTime are correctly converted from Firestore Timestamps
         setCheckInTime(data.checkInTime instanceof Timestamp ? data.checkInTime.toDate() : null);
         setCheckOutTime(data.checkOutTime instanceof Timestamp ? data.checkOutTime.toDate() : null);
       } else {
@@ -116,23 +117,26 @@ const BossDashboard: React.FC = () => {
     }
 
     setButtonLoading(true);
-    const now = new Date();
 
     try {
+      // Use serverTimestamp() directly in Firestore for consistency
       await setDoc(
-        doc(db, 'attendance', userId, 'daily', getTodayKey()),
+        doc(db, 'attendance', userId, 'daily', getTodayKey()), // Uses 'daily'
         {
           checkInTime: serverTimestamp(),
-          checkOutTime: null,
+          checkOutTime: null, // Ensure this is explicitly null for check-in
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
-      setCheckInTime(now);
-      setCheckOutTime(null);
+      Alert.alert('Success', 'Checked in successfully!');
+      // Re-load data after successful check-in to get the server's timestamp
+      await loadData();
     } catch (err) {
       console.error('Error saving check-in:', err);
       Alert.alert('Error', 'Could not save check-in');
+      // On error, revert optimism by re-loading data
+      await loadData();
     } finally {
       setButtonLoading(false);
     }
@@ -153,26 +157,32 @@ const BossDashboard: React.FC = () => {
     }
 
     setButtonLoading(true);
-    const now = new Date();
 
     try {
+      // Use serverTimestamp() directly in Firestore for consistency
       await updateDoc(
-        doc(db, 'attendance', userId, 'daily', getTodayKey()),
+        doc(db, 'attendance', userId, 'daily', getTodayKey()), // Uses 'daily'
         {
           checkOutTime: serverTimestamp(),
           updatedAt: serverTimestamp(),
         }
       );
-      setCheckOutTime(now);
+      Alert.alert('Success', 'Checked out successfully!');
+      // **Crucially, re-load data after successful check-out to get the server's timestamp**
+      await loadData();
     } catch (err) {
       console.error('Error saving check-out:', err);
       Alert.alert('Error', 'Could not save check-out');
+      // On error, re-load data to revert optimism
+      await loadData();
     } finally {
       setButtonLoading(false);
     }
   };
 
   const calculateHoursWorked = useCallback(() => {
+    // This calculation remains the same, as it operates on the Date objects
+    // that are correctly set by loadData after Firestore interactions.
     if (checkInTime && checkOutTime) {
       const diff = (checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
       return diff >= 0 ? diff.toFixed(2) : '0.00';
@@ -193,7 +203,7 @@ const BossDashboard: React.FC = () => {
 
       {/* Header Background (curved shape) */}
       <View style={styles.headerBackground} />
-      
+
       {/* Logout Button */}
       <TouchableOpacity
         style={styles.logoutButton}
@@ -223,6 +233,7 @@ const BossDashboard: React.FC = () => {
         {/* Attendance Card */}
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Total hours today</Text>
+          {/* Ternary for conditional rendering of ActivityIndicator or Text */}
           {loading ? (
             <ActivityIndicator size="large" color={Colors.primaryBlue} style={{ marginVertical: 10 }} />
           ) : (
@@ -242,6 +253,7 @@ const BossDashboard: React.FC = () => {
               onPress={handleCheckIn}
               disabled={buttonLoading || !!checkInTime}
             >
+              {/* Ternary for conditional rendering of ActivityIndicator or Text */}
               {buttonLoading && !checkInTime ? (
                 <ActivityIndicator color={Colors.white} />
               ) : (
@@ -254,6 +266,7 @@ const BossDashboard: React.FC = () => {
               onPress={handleCheckOut}
               disabled={buttonLoading || !checkInTime || !!checkOutTime}
             >
+              {/* Ternary for conditional rendering of ActivityIndicator or Text */}
               {buttonLoading && checkInTime && !checkOutTime ? (
                 <ActivityIndicator color={Colors.primaryBlue} />
               ) : (
@@ -277,7 +290,7 @@ const BossDashboard: React.FC = () => {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.exploreTile}
-            onPress={() => router.push('/IndividualAttendance')} 
+            onPress={() => router.push('/IndividualAttendance')}
           >
             <Feather name="calendar" size={24} color={Colors.darkBlue} />
             <Text style={styles.exploreLabel}>My Logs</Text>
@@ -295,7 +308,7 @@ const BossDashboard: React.FC = () => {
             onPress={() => router.push('/NewProject')}
           >
             <Feather name="plus-circle" size={24} color={Colors.darkBlue} />
-            <Text style={styles.exploreLabel}>Add Task</Text>
+            <Text style={styles.exploreLabel}>New Project</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.exploreTile}
@@ -309,7 +322,7 @@ const BossDashboard: React.FC = () => {
             onPress={() => router.push('/AllProjects')}
           >
             <Feather name="layers" size={24} color={Colors.darkBlue} />
-            <Text style={styles.exploreLabel}>All Tasks</Text>
+            <Text style={styles.exploreLabel}>All Projects</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -352,6 +365,9 @@ const styles = StyleSheet.create({
     top: Platform.OS === 'android' ? StatusBar.currentHeight! + 10 : 50,
     left: 20,
     zIndex: 10,
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
     // Add subtle shadow to the button itself for pop
     ...Platform.select({
       ios: {
@@ -457,6 +473,8 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8, // Increased margin
     alignItems: 'center',
+    borderWidth: 1, // Add border for visual separation
+    borderColor: Colors.primaryBlue, // Primary blue border for check-out button
     ...Platform.select({ // Add shadow to button
       ios: {
         shadowColor: Colors.lightBlue, // Use light blue for shadow
@@ -494,6 +512,8 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginVertical: 25, // Increased vertical margin
     color: Colors.darkBlue, // Dark blue for title
+    alignSelf: 'flex-start', // Align to left
+    marginLeft: width * 0.05, // Match card alignment
   },
   exploreGrid: {
     flexDirection: 'row',

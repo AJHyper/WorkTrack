@@ -1,12 +1,12 @@
 import { Feather } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Dimensions,
   FlatList,
-  Platform, // Import Platform for shadows
+  Platform,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -17,26 +17,24 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, Timestamp, where } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
 const { width } = Dimensions.get('window');
 
-// --- Consistent Color Palette from DashboardEmp.tsx ---
 const Colors = {
-  primaryBlue: '#2A72B8',      // A deeper, more prominent blue from the logo's vibe
-  darkBlue: '#1F558C',         // An even darker shade for headers/strong accents
-  lightBlue: '#C9DCEC',        // A softer, light blue for backgrounds/cards
-  lighterBlue: '#EAF3FA',      // Very subtle light blue for overall background
+  primaryBlue: '#2A72B8',
+  darkBlue: '#1F558C',
+  lightBlue: '#C9DCEC',
+  lighterBlue: '#EAF3FA',
   white: '#FFFFFF',
-  black: '#212121',            // Dark grey for main text
-  mediumGrey: '#757575',       // For secondary text
-  lightGrey: '#BDBDBD',        // For borders/dividers
+  black: '#212121',
+  mediumGrey: '#757575',
+  lightGrey: '#BDBDBD',
 };
 
-// Define a type for your attendance data for clarity
 interface AttendanceRecord {
-  id: string; // Document ID (the date string)
+  id: string;
   date: string;
   day: string;
   checkInTime: string;
@@ -51,108 +49,148 @@ const MonthlyAttendance: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentMonth, setCurrentMonth] = useState(new Date()); // State to track the current month
+  const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  // Helper to format date keys (YYYY-MM-DD)
   const formatDateKey = (date: Date) => date.toISOString().slice(0, 10);
 
-  // Helper to calculate hours worked
-  const calculateHoursWorked = (checkIn: string, checkOut: string): string => {
-    try {
-      const checkInDate = new Date(checkIn);
-      const checkOutDate = new Date(checkOut);
-      if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime())) {
-        return '-'; // Invalid date format
-      }
-      const diff = (checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60);
-      return diff >= 0 ? diff.toFixed(2) : '-'; // Ensure non-negative hours
-    } catch (error) {
-      console.error("Error calculating hours:", error);
-      return '-';
+  const calculateHoursWorked = useCallback((checkIn: Date | null, checkOut: Date | null): string => {
+    if (!checkIn || !checkOut || isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
+      return '0.00';
     }
-  };
+    const diff = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
+    return diff >= 0 ? diff.toFixed(2) : '0.00';
+  }, []);
 
-  // Function to load attendance data for the selected month
-  const loadMonthlyAttendance = async (month: Date) => {
+  const loadMonthlyAttendance = useCallback(async (month: Date) => {
     setLoading(true);
-    setAttendanceData([]); // Clear previous data
+    setAttendanceData([]);
 
     const userId = user?.uid;
     if (!userId) {
+      console.log('No user ID found. Redirecting to login.');
       setLoading(false);
       return;
     }
+    console.log('Loading attendance for user ID:', userId);
 
     try {
       const startOfMonth = new Date(month.getFullYear(), month.getMonth(), 1);
-      const endOfMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0); // Last day of the month
+      const endOfMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0); // Correctly gets the last day of the month
 
-      // Format for Firestore query range
       const startKey = formatDateKey(startOfMonth);
-      const endKey = formatDateKey(endOfMonth);
+      // Ensure endKey accurately reflects the last day of the month (e.g., 2025-05-31 for May)
+      const endKey = `${endOfMonth.getFullYear()}-${(endOfMonth.getMonth() + 1).toString().padStart(2, '0')}-${endOfMonth.getDate().toString().padStart(2, '0')}`;
+
+      console.log('Querying for month:', month.toLocaleString('en-US', { month: 'long', year: 'numeric' }));
+      console.log('Start Date Key (Inclusive):', startKey);
+      console.log('End Date Key (Inclusive):', endKey);
 
       const q = query(
         collection(db, 'attendance', userId, 'daily'),
-        where('__name__', '>=', startKey), // Query documents whose IDs (dates) are >= start of month
-        where('__name__', '<=', endKey),   // Query documents whose IDs (dates) are <= end of month
-        orderBy('__name__', 'asc')         // Order by date ascending
+        where('__name__', '>=', startKey),
+        where('__name__', '<=', endKey),
+        orderBy('__name__', 'asc')
       );
 
       const querySnapshot = await getDocs(q);
+
+      console.log('Query Snapshot Empty:', querySnapshot.empty);
+      console.log('Number of documents found:', querySnapshot.size);
+
       const fetchedData: AttendanceRecord[] = [];
 
+      if (querySnapshot.empty) {
+        console.log('No attendance records found for this month and user.');
+      }
+
       querySnapshot.forEach((docSnap) => {
-        const docId = docSnap.id; // This is the YYYY-MM-DD date string
+        const docId = docSnap.id;
         const data = docSnap.data();
 
-        const checkIn = data.checkInTime || null;
-        const checkOut = data.checkOutTime || null;
-        const hours = checkIn && checkOut ? calculateHoursWorked(checkIn, checkOut) : '0';
+        console.log(`--- Processing document ID: ${docId} ---`);
+        console.log('Raw Firestore Data:', data);
+
+        let checkInDateObj: Date | null = null;
+        let checkOutDateObj: Date | null = null;
+
+        // Attempt to convert from Timestamp object first
+        if (data.checkInTime instanceof Timestamp) {
+          checkInDateObj = data.checkInTime.toDate();
+        } else if (typeof data.checkInTime === 'string') {
+          // If it's a string, parse it using new Date()
+          const parsedDate = new Date(data.checkInTime);
+          if (!isNaN(parsedDate.getTime())) {
+            checkInDateObj = parsedDate;
+          } else {
+            console.warn(`Could not parse checkInTime string: ${data.checkInTime}`);
+          }
+        }
+
+        if (data.checkOutTime instanceof Timestamp) {
+          checkOutDateObj = data.checkOutTime.toDate();
+        } else if (typeof data.checkOutTime === 'string') {
+          const parsedDate = new Date(data.checkOutTime);
+          if (!isNaN(parsedDate.getTime())) {
+            checkOutDateObj = parsedDate;
+          } else {
+            console.warn(`Could not parse checkOutTime string: ${data.checkOutTime}`);
+          }
+        }
+
+        console.log('checkInDateObj (converted):', checkInDateObj);
+        console.log('checkOutDateObj (converted):', checkOutDateObj);
+
+        const hours = calculateHoursWorked(checkInDateObj, checkOutDateObj);
+        console.log('Calculated Hours:', hours);
 
         fetchedData.push({
-          id: docId, // Use the document ID as the unique key for FlatList
-          date: new Date(docId).toLocaleDateString('en-GB'), // Format for display (DD/MM/YY)
+          id: docId,
+          date: new Date(docId).toLocaleDateString('en-GB'),
           day: new Date(docId).toLocaleDateString('en-GB', { weekday: 'short' }),
-          checkInTime: checkIn ? new Date(checkIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--',
-          checkOutTime: checkOut ? new Date(checkOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--',
+          checkInTime: checkInDateObj ? checkInDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--',
+          checkOutTime: checkOutDateObj ? checkOutDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--',
           hoursWorked: hours,
         });
       });
 
       setAttendanceData(fetchedData);
+      console.log('Final fetchedData for display:', fetchedData);
+
     } catch (error) {
       console.error('Error loading monthly attendance:', error);
-      Alert.alert('Error', 'Failed to load monthly attendance.');
+      Alert.alert('Error', 'Failed to load monthly attendance. Please check your internet connection or try again later.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, calculateHoursWorked]);
 
-  // Listen for auth state changes to get user ID
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (usr) => {
       if (usr) {
         setUser(usr);
+        console.log('Auth state changed: User is logged in.', usr.uid);
       } else {
         setUser(null);
-        router.push('/auth/Login'); // Redirect if no user
+        console.log('Auth state changed: User is logged out. Redirecting.');
+        router.push('/auth/Login');
       }
     });
     return unsubscribe;
-  }, []);
+  }, [router]);
 
-  // Load data when user changes or currentMonth changes
   useEffect(() => {
     if (user) {
       loadMonthlyAttendance(currentMonth);
+    } else {
+      setAttendanceData([]);
+      setLoading(false);
     }
-  }, [user, currentMonth]); // Depend on user and currentMonth
+  }, [user, currentMonth, loadMonthlyAttendance]);
 
   const goBack = () => {
     router.back();
   };
 
-  // Functions to navigate months
   const goToPreviousMonth = () => {
     setCurrentMonth((prevMonth) => {
       const newMonth = new Date(prevMonth);
@@ -169,7 +207,6 @@ const MonthlyAttendance: React.FC = () => {
     });
   };
 
-  // Render item for FlatList
   const renderItem = ({ item }: { item: AttendanceRecord }) => (
     <View style={styles.dataRow}>
       <Text style={[styles.dataText, styles.columnDate]}>{item.date}</Text>
@@ -189,7 +226,6 @@ const MonthlyAttendance: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.darkBlue} />
 
-      {/* Header with LinearGradient, matching Dashboard aesthetic */}
       <LinearGradient
         colors={[Colors.primaryBlue, Colors.darkBlue]}
         style={[styles.header, { paddingTop: insets.top, height: 60 + insets.top }]}
@@ -206,9 +242,7 @@ const MonthlyAttendance: React.FC = () => {
         <Text style={styles.headerTitle}>Monthly Attendance</Text>
       </LinearGradient>
 
-      {/* Content */}
       <View style={styles.container}>
-        {/* Month Navigation */}
         <View style={styles.monthNavigation}>
           <TouchableOpacity onPress={goToPreviousMonth}>
             <Feather name="chevron-left" size={26} color={Colors.primaryBlue} />
@@ -219,7 +253,6 @@ const MonthlyAttendance: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Table Header */}
         <View style={styles.tableHeader}>
           <Text style={[styles.headerText, styles.columnDate]}>Date</Text>
           <Text style={[styles.headerText, styles.columnDay]}>Day</Text>
@@ -228,7 +261,6 @@ const MonthlyAttendance: React.FC = () => {
           <Text style={[styles.headerText, styles.columnHours]}>Hours</Text>
         </View>
 
-        {/* Attendance Data List */}
         {loading ? (
           <Text style={styles.loadingText}>Loading attendance data...</Text>
         ) : attendanceData.length > 0 ? (
@@ -250,7 +282,7 @@ const MonthlyAttendance: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: Colors.lighterBlue, // Use lighter blue for background
+    backgroundColor: Colors.lighterBlue,
   },
   header: {
     width: '100%',
@@ -258,7 +290,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    ...Platform.select({ // Subtle shadow for the header
+    ...Platform.select({
       ios: {
         shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
@@ -272,13 +304,13 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: Colors.white,
-    fontSize: 24, // Consistent header title size
+    fontSize: 24,
     fontWeight: 'bold',
     textAlign: 'center',
   },
   container: {
     flex: 1,
-    paddingHorizontal: 15, // Slightly reduced padding for a fuller table view
+    paddingHorizontal: 15,
     paddingTop: 20,
   },
   monthNavigation: {
@@ -286,11 +318,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
-    backgroundColor: Colors.white, // White background for the month selector
-    paddingVertical: 12, // Increased padding
-    paddingHorizontal: 20, // Increased padding
-    borderRadius: 12, // More rounded corners
-    ...Platform.select({ // Add shadow
+    backgroundColor: Colors.white,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    ...Platform.select({
       ios: {
         shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
@@ -303,18 +335,18 @@ const styles = StyleSheet.create({
     }),
   },
   monthText: {
-    fontSize: 18, // Slightly smaller
-    fontWeight: '600', // Semibold
-    color: Colors.darkBlue, // Darker blue for text
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.darkBlue,
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: Colors.primaryBlue, // Primary blue for table header
-    paddingVertical: 12, // Consistent padding
-    borderRadius: 10, // Rounded corners
-    marginBottom: 8, // Spacing below header
+    backgroundColor: Colors.primaryBlue,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginBottom: 8,
     paddingHorizontal: 10,
-    ...Platform.select({ // Add subtle shadow
+    ...Platform.select({
       ios: {
         shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
@@ -328,19 +360,19 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontWeight: 'bold',
-    fontSize: 13, // Slightly larger font
-    color: Colors.white, // White text for header
+    fontSize: 13,
+    color: Colors.white,
     textAlign: 'center',
   },
   dataRow: {
     flexDirection: 'row',
-    paddingVertical: 14, // Increased vertical padding
-    backgroundColor: Colors.white, // White background for data rows
-    borderRadius: 10, // Rounded corners
-    marginBottom: 6, // Spacing between rows
+    paddingVertical: 14,
+    backgroundColor: Colors.white,
+    borderRadius: 10,
+    marginBottom: 6,
     paddingHorizontal: 10,
     alignItems: 'center',
-    ...Platform.select({ // Subtle shadow for each row
+    ...Platform.select({
       ios: {
         shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 1 },
@@ -353,8 +385,8 @@ const styles = StyleSheet.create({
     }),
   },
   dataText: {
-    fontSize: 13, // Consistent font size
-    color: Colors.black, // Dark text for data
+    fontSize: 13,
+    color: Colors.black,
     textAlign: 'center',
   },
   columnDate: {
@@ -371,8 +403,8 @@ const styles = StyleSheet.create({
   },
   columnHours: {
     flex: 1.5,
-    textAlign: 'right', // Align hours to the right for better readability
-    fontWeight: '600', // Make hours worked slightly bolder
+    textAlign: 'right',
+    fontWeight: '600',
   },
   loadingText: {
     textAlign: 'center',
@@ -387,7 +419,7 @@ const styles = StyleSheet.create({
     color: Colors.mediumGrey,
   },
   flatListContent: {
-    paddingBottom: 20, // Add some padding at the bottom of the list
+    paddingBottom: 20,
   }
 });
 

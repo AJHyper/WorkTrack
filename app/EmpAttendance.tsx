@@ -1,8 +1,12 @@
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
   FlatList,
   Platform,
   SafeAreaView,
@@ -15,48 +19,190 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-type AttendanceItem = {
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  Timestamp,
+} from 'firebase/firestore';
+import { auth, db } from '../config/firebase';
+
+const { width } = Dimensions.get('window');
+
+const Colors = {
+  primaryBlue: '#2A72B8',
+  darkBlue: '#1F558C',
+  lightBlue: '#C9DCEC',
+  lighterBlue: '#EAF3FA',
+  white: '#FFFFFF',
+  black: '#212121',
+  mediumGrey: '#757575',
+  lightGrey: '#BDBDBD',
+};
+
+interface AttendanceItem {
+  id: string;
   date: string;
   day: string;
   name: string;
   status: 'Present' | 'Absent';
-  hours: number;
-};
-
-const mockAttendanceData: AttendanceItem[] = [
-  { date: '28-04-2025', day: 'Monday', name: 'Alfred Jokelin', status: 'Present', hours: 8.5 },
-  { date: '28-04-2025', day: 'Monday', name: 'John Doe', status: 'Absent', hours: 0 },
-  { date: '28-04-2025', day: 'Monday', name: 'Jane Smith', status: 'Present', hours: 9 },
-];
+  checkInTime: string;
+  checkOutTime: string;
+  hours: string;
+}
 
 const EmpAttendance: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [date, setDate] = useState<Date>(new Date('2025-04-28'));
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [showPicker, setShowPicker] = useState<boolean>(false);
+  const [attendanceData, setAttendanceData] = useState<AttendanceItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
-  // Format Date object to DD-MM-YYYY string
-  const formatDate = (date: Date) => {
+  // Helper to format Date object to YYYY-MM-DD string for Firestore document IDs
+  const formatDateKey = (date: Date) => date.toISOString().slice(0, 10);
+
+  // Helper to format Date object to DD-MM-YY string for display
+  const formatDateForDisplay = (date: Date) => {
     const day = date.getDate().toString().padStart(2, '0');
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
+    // MODIFIED: Get last two digits of the year
+    const year = date.getFullYear().toString().slice(-2);
     return `${day}-${month}-${year}`;
   };
 
-  const selectedDate = formatDate(date);
+  // Helper to format time for display
+  const formatTimeForDisplay = useCallback((date: Date | null): string => {
+    return date ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--';
+  }, []);
 
-  const filteredData = mockAttendanceData.filter(
-    (item) =>
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
-      item.date === selectedDate
-  );
+  // Helper to calculate hours worked
+  const calculateHoursWorked = useCallback((checkIn: Date | null, checkOut: Date | null): string => {
+    if (!checkIn || isNaN(checkIn.getTime())) {
+      return '0.00';
+    }
+    const actualCheckOut = checkOut && !isNaN(checkOut.getTime()) ? checkOut : new Date();
+
+    const diff = (actualCheckOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
+    return diff >= 0 ? diff.toFixed(2) : '0.00';
+  }, []);
+
+  // --- Main data loading function ---
+  const loadAllEmployeeAttendance = useCallback(async () => {
+    setLoading(true);
+    setAttendanceData([]);
+
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const selectedDateKey = formatDateKey(selectedDate);
+      const dayOfWeek = selectedDate.toLocaleDateString('en-GB', { weekday: 'long' });
+
+      const usersQuery = query(collection(db, 'users'));
+      const usersSnapshot = await getDocs(usersQuery);
+      const employees: { uid: string; firstName: string; lastName: string }[] = [];
+      usersSnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        employees.push({
+          uid: docSnap.id,
+          firstName: data.firstName || '',
+          lastName: data.lastName || '',
+        });
+      });
+
+      const fetchedAttendance: AttendanceItem[] = [];
+
+      for (const employee of employees) {
+        const attendanceDocRef = doc(db, 'attendance', employee.uid, 'daily', selectedDateKey);
+        const attendanceSnap = await getDoc(attendanceDocRef);
+
+        let status: 'Present' | 'Absent' = 'Absent';
+        let checkInDateObj: Date | null = null;
+        let checkOutDateObj: Date | null = null;
+        let hours = '0.00';
+
+        if (attendanceSnap.exists()) {
+          const data = attendanceSnap.data();
+
+          if (data.checkInTime instanceof Timestamp) {
+            checkInDateObj = data.checkInTime.toDate();
+          } else if (typeof data.checkInTime === 'string') {
+            const parsed = new Date(data.checkInTime);
+            if (!isNaN(parsed.getTime())) checkInDateObj = parsed;
+          }
+
+          if (data.checkOutTime instanceof Timestamp) {
+            checkOutDateObj = data.checkOutTime.toDate();
+          } else if (typeof data.checkOutTime === 'string') {
+            const parsed = new Date(data.checkOutTime);
+            if (!isNaN(parsed.getTime())) checkOutDateObj = parsed;
+          }
+
+          if (checkInDateObj) {
+            const calculatedHours = parseFloat(calculateHoursWorked(checkInDateObj, checkOutDateObj));
+            if (checkOutDateObj === null || calculatedHours > 0) {
+              status = 'Present';
+              hours = calculatedHours.toFixed(2);
+            } else {
+              status = 'Absent';
+              hours = '0.00';
+            }
+          }
+        }
+
+        fetchedAttendance.push({
+          id: employee.uid,
+          date: formatDateForDisplay(selectedDate),
+          day: dayOfWeek,
+          name: `${employee.firstName} ${employee.lastName}`.trim(),
+          status: status,
+          checkInTime: formatTimeForDisplay(checkInDateObj),
+          checkOutTime: formatTimeForDisplay(checkOutDateObj),
+          hours: hours,
+        });
+      }
+
+      fetchedAttendance.sort((a, b) => a.name.localeCompare(b.name));
+
+      setAttendanceData(fetchedAttendance);
+    } catch (error) {
+      console.error('Error loading all employee attendance:', error);
+      Alert.alert('Error', 'Failed to load employee attendance. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDate, currentUser, calculateHoursWorked, formatTimeForDisplay]);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        setCurrentUser(user);
+      } else {
+        setCurrentUser(null);
+        router.push('/auth/Login');
+      }
+    });
+    return unsubscribe;
+  }, [router]);
+
+  useEffect(() => {
+    if (currentUser) {
+      loadAllEmployeeAttendance();
+    }
+  }, [currentUser, selectedDate, loadAllEmployeeAttendance]);
 
   const onChangeDate = (event: any, selectedDateValue?: Date) => {
-    setShowPicker(Platform.OS === 'ios'); // iOS keeps it open, Android closes after selection
+    setShowPicker(Platform.OS === 'ios');
     if (selectedDateValue) {
-      setDate(selectedDateValue);
+      setSelectedDate(selectedDateValue);
     }
   };
 
@@ -64,26 +210,48 @@ const EmpAttendance: React.FC = () => {
     router.back();
   };
 
+  const renderItem = ({ item }: { item: AttendanceItem }) => (
+    <View style={styles.dataRow}>
+      <Text style={[styles.dataText, styles.columnDate]}>{item.date}</Text>
+      <Text style={[styles.dataText, styles.columnDay]}>{item.day.slice(0, 3)}</Text>
+      <Text style={[styles.dataText, styles.columnName]}>{item.name}</Text>
+      <Text
+        style={[
+          styles.dataText,
+          styles.columnStatus,
+          { color: item.status === 'Present' ? Colors.primaryBlue : Colors.mediumGrey },
+        ]}
+      >
+        {item.status}
+      </Text>
+      <Text style={[styles.dataText, styles.columnHours]}>{item.hours}</Text>
+    </View>
+  );
+
   return (
     <>
-      {/* Match StatusBar from AttendanceDetailsScreen */}
-      <StatusBar barStyle="light-content" backgroundColor="#003399" />
+      <StatusBar barStyle="light-content" backgroundColor={Colors.darkBlue} />
 
       <SafeAreaView style={styles.safeArea}>
-        <View style={[styles.header, { paddingTop: insets.top, height: 56 + insets.top }]}>
+        <LinearGradient
+          colors={[Colors.primaryBlue, Colors.darkBlue]}
+          style={[styles.header, { paddingTop: insets.top }]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
           <TouchableOpacity style={styles.backButton} onPress={goBack}>
-            <Feather name="arrow-left" size={24} color="white" />
+            <Feather name="arrow-left" size={24} color={Colors.white} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Employee Attendance</Text>
+          <Text style={styles.headerTitle}>Team Attendance</Text>
           <View style={styles.rightPlaceholder} />
-        </View>
+        </LinearGradient>
 
         <View style={styles.container}>
           <View style={styles.filters}>
             <TextInput
               style={styles.input}
               placeholder="Search by name"
-              placeholderTextColor="#999"
+              placeholderTextColor={Colors.mediumGrey}
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
@@ -93,53 +261,42 @@ const EmpAttendance: React.FC = () => {
               style={styles.datePickerButton}
               activeOpacity={0.7}
             >
-              <Text style={styles.datePickerText}>{selectedDate}</Text>
+              <Text style={styles.datePickerText}>{formatDateForDisplay(selectedDate)}</Text>
+              <Feather name="calendar" size={20} color={Colors.primaryBlue} />
             </TouchableOpacity>
 
             {showPicker && (
               <DateTimePicker
-                value={date}
+                value={selectedDate}
                 mode="date"
                 display="default"
                 onChange={onChangeDate}
-                maximumDate={new Date()} // optional, restrict future dates
+                maximumDate={new Date()}
               />
             )}
           </View>
 
           <View style={styles.tableHeader}>
-            <Text style={[styles.headerText, { flex: 2 }]}>Date</Text>
-            <Text style={[styles.headerText, { flex: 2 }]}>Day</Text>
-            <Text style={[styles.headerText, { flex: 3 }]}>Name</Text>
-            <Text style={[styles.headerText, { flex: 2, textAlign: 'center' }]}>Status</Text>
-            <Text style={[styles.headerText, { flex: 2, textAlign: 'center' }]}>Hours</Text>
+            <Text style={[styles.headerText, styles.columnDate]}>Date</Text>
+            <Text style={[styles.headerText, styles.columnDay]}>Day</Text>
+            <Text style={[styles.headerText, styles.columnName]}>Name</Text>
+            <Text style={[styles.headerText, styles.columnStatus]}>Status</Text>
+            <Text style={[styles.headerText, styles.columnHours]}>Hours</Text>
           </View>
 
-          <FlatList
-            data={filteredData}
-            keyExtractor={(item, index) => item.name + index}
-            contentContainerStyle={{ paddingBottom: 40 }}
-            renderItem={({ item }: { item: AttendanceItem }) => (
-              <View style={styles.dataRow}>
-                <Text style={[styles.dataText, { flex: 2 }]}>{item.date}</Text>
-                <Text style={[styles.dataText, { flex: 2 }]}>{item.day}</Text>
-                <Text style={[styles.dataText, { flex: 3 }]}>{item.name}</Text>
-                <Text
-                  style={[
-                    styles.dataText,
-                    {
-                      flex: 2,
-                      textAlign: 'center',
-                      color: item.status === 'Present' ? 'green' : 'red',
-                    },
-                  ]}
-                >
-                  {item.status}
-                </Text>
-                <Text style={[styles.dataText, { flex: 2, textAlign: 'center' }]}>{item.hours}</Text>
-              </View>
-            )}
-          />
+          {loading ? (
+            <ActivityIndicator size="large" color={Colors.primaryBlue} style={styles.loadingIndicator} />
+          ) : attendanceData.length > 0 ? (
+            <FlatList
+              data={attendanceData.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()))}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.flatListContent}
+              renderItem={renderItem}
+              showsVerticalScrollIndicator={false}
+            />
+          ) : (
+            <Text style={styles.noDataText}>No attendance data found for this date.</Text>
+          )}
         </View>
       </SafeAreaView>
     </>
@@ -149,78 +306,180 @@ const EmpAttendance: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#E6F0FF', // same as AttendanceDetailsScreen background
+    backgroundColor: Colors.lighterBlue,
   },
   header: {
-    backgroundColor: '#003399',
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
     justifyContent: 'space-between',
-    height: 56,
+    paddingHorizontal: 16,
+    minHeight: 56 + (Platform.OS === 'ios' ? 0 : StatusBar.currentHeight || 0),
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.black,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
   },
   backButton: {
-    padding: 4,
+    padding: 8,
+    width: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
-    color: 'white',
-    fontSize: 18,
+    color: Colors.white,
+    fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
     flex: 1,
   },
   rightPlaceholder: {
-    width: 32,
+    width: 40,
   },
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    marginTop: 16,
+    paddingHorizontal: 15,
+    marginTop: 15,
   },
   filters: {
-    marginBottom: 16,
+    marginBottom: 15,
   },
   input: {
-    backgroundColor: '#fff',
-    padding: 10,
-    borderRadius: 8,
-    borderColor: '#ccc',
+    backgroundColor: Colors.white,
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    borderRadius: 10,
+    borderColor: Colors.lightGrey,
     borderWidth: 1,
-    fontSize: 14,
+    fontSize: 16,
     marginBottom: 10,
+    color: Colors.black,
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.black,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
   },
   datePickerButton: {
-    backgroundColor: '#fff',
-    padding: 10,
-    borderRadius: 8,
-    borderColor: '#ccc',
+    backgroundColor: Colors.white,
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    borderRadius: 10,
+    borderColor: Colors.lightGrey,
     borderWidth: 1,
     marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.black,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
   },
   datePickerText: {
-    fontSize: 14,
-    color: '#333',
+    fontSize: 16,
+    color: Colors.black,
   },
   tableHeader: {
     flexDirection: 'row',
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
+    backgroundColor: Colors.primaryBlue,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.black,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   headerText: {
     fontWeight: 'bold',
-    fontSize: 12,
-    color: '#333',
+    fontSize: 13,
+    color: Colors.white,
+    textAlign: 'center',
   },
   dataRow: {
     flexDirection: 'row',
-    paddingVertical: 10,
-    borderBottomColor: '#eee',
-    borderBottomWidth: 1,
+    paddingVertical: 14,
+    backgroundColor: Colors.white,
+    borderRadius: 10,
+    marginBottom: 6,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.black,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
   },
   dataText: {
-    fontSize: 12,
-    color: '#555',
+    fontSize: 13,
+    color: Colors.black,
+    textAlign: 'left',
+  },
+  columnDate: {
+    flex: 2,
+  },
+  columnDay: {
+    flex: 1.5,
+  },
+  columnName: {
+    flex: 3,
+  },
+  columnStatus: {
+    flex: 2,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  columnHours: {
+    flex: 1.5,
+    textAlign: 'right',
+    fontWeight: '600',
+  },
+  loadingIndicator: {
+    marginTop: 50,
+  },
+  noDataText: {
+    textAlign: 'center',
+    marginTop: 50,
+    fontSize: 16,
+    color: Colors.mediumGrey,
+  },
+  flatListContent: {
+    paddingBottom: 20,
   },
 });
 
