@@ -1,13 +1,8 @@
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import React, { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  StyleSheet,
-  Text,
-  View
-} from 'react-native';
+import { onAuthStateChanged } from 'firebase/auth';
+import { collection, onSnapshot } from 'firebase/firestore';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { auth, db } from '../config/firebase'; // adjust path if needed
 
 const Colors = {
   primaryBlue: '#007AFF',
@@ -38,63 +33,96 @@ type Project = {
 const MyAssignedProjectsScreen = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  const currentUserId = auth().currentUser?.uid;
-
+  // Track auth state
   useEffect(() => {
-    if (!currentUserId) {
-      setLoading(false);
-      return;
-    }
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCurrentUserId(user.uid);
+      } else {
+        setCurrentUserId(null);
+        setProjects([]);
+        setLoading(false);
+        setError('User not logged in');
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
-    // Firestore cannot query array of objects by nested field,
-    // so fetch all and filter client-side
-    const unsubscribe = firestore()
-      .collection('projects')
-      .onSnapshot(
-        snapshot => {
-          const fetchedProjects: Project[] = [];
+  // Listen to projects when userId is set
+  useEffect(() => {
+    if (!currentUserId) return;
 
-          snapshot.forEach(doc => {
-            const data = doc.data();
+    setLoading(true);
+    setError(null);
 
-            // Safety checks and type assertions
-            const assignedUsers: AssignedUser[] = data.assignedUsers || [];
+    const unsubscribe = onSnapshot(
+      collection(db, 'projects'),
+      (snapshot) => {
+        const fetchedProjects: Project[] = [];
 
-            // Check if current user is assigned to this project
-            const isAssigned = assignedUsers.some(user => user.id === currentUserId);
+        snapshot.forEach((doc) => {
+          const data = doc.data() as Omit<Project, 'id'> & { assignedUsers?: AssignedUser[] };
 
-            if (isAssigned) {
-              fetchedProjects.push({
-                id: doc.id,
-                title: data.title,
-                status: data.status,
-                startDate: data.startDate,
-                location: data.location,
-                description: data.description,
-                createdAt: data.createdAt,
-                createdBy: data.createdBy,
-                assignedUsers: assignedUsers,
-              });
-            }
-          });
+          const assignedUsers = data.assignedUsers ?? [];
 
-          setProjects(fetchedProjects);
-          setLoading(false);
-        },
-        error => {
-          console.error('Error fetching projects:', error);
-          setLoading(false);
-        }
-      );
+          // Check if current user is assigned to this project
+          const isAssigned = assignedUsers.some((user) => user.id === currentUserId);
+
+          if (isAssigned) {
+            fetchedProjects.push({
+              id: doc.id,
+              title: data.title ?? 'Untitled Project',
+              status: data.status ?? 'Unknown',
+              startDate: data.startDate ?? 'N/A',
+              location: data.location ?? 'N/A',
+              description: data.description ?? 'No description provided',
+              createdAt: data.createdAt ?? '',
+              createdBy: data.createdBy ?? '',
+              assignedUsers,
+            });
+          }
+        });
+
+        setProjects(fetchedProjects);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Error fetching projects:', err);
+        setError('Failed to load projects');
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, [currentUserId]);
+
+  const renderProjectItem = useCallback(({ item }: { item: Project }) => (
+    <View style={styles.projectCard}>
+      <Text style={styles.projectTitle}>{item.title}</Text>
+      <Text style={styles.projectDescription} numberOfLines={2}>
+        {item.description}
+      </Text>
+      <Text style={styles.projectMeta}>Start Date: {item.startDate}</Text>
+      <Text style={styles.projectMeta}>Location: {item.location}</Text>
+      <Text style={styles.projectMeta}>Status: {item.status}</Text>
+    </View>
+  ), []);
 
   if (loading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={Colors.primaryBlue} />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.errorText}>{error}</Text>
       </View>
     );
   }
@@ -107,23 +135,11 @@ const MyAssignedProjectsScreen = () => {
     );
   }
 
-  const renderProjectItem = ({ item }: { item: Project }) => (
-    <View style={styles.projectCard}>
-      <Text style={styles.projectTitle}>{item.title}</Text>
-      <Text style={styles.projectDescription} numberOfLines={2}>
-        {item.description}
-      </Text>
-      <Text style={styles.projectMeta}>Start Date: {item.startDate}</Text>
-      <Text style={styles.projectMeta}>Location: {item.location}</Text>
-      <Text style={styles.projectMeta}>Status: {item.status}</Text>
-    </View>
-  );
-
   return (
     <View style={styles.container}>
       <FlatList
         data={projects}
-        keyExtractor={item => item.id}
+        keyExtractor={(item) => item.id}
         renderItem={renderProjectItem}
         contentContainerStyle={{ padding: 16 }}
       />
@@ -140,6 +156,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: 'red',
   },
   emptyText: {
     fontSize: 16,

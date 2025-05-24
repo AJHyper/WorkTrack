@@ -10,21 +10,24 @@ const firebaseConfig = {
   projectId: "worktrack-aeca0",
   storageBucket: "worktrack-aeca0.appspot.com",
   messagingSenderId: "331304936885",
-  appId: "1:331304936885:web:b648d8a8ff7fc421bc65fc"
+  appId: "1:331304936885:web:b648d8a8ff7fc421bc65fc",
 };
 
+// Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
+// Initialize Firebase Auth with React Native persistence using AsyncStorage
 const auth = initializeAuth(app, {
   persistence: getReactNativePersistence(AsyncStorage),
 });
 
+// Initialize Firestore database
 const db = getFirestore(app);
+
+// Initialize Firebase Storage
 const storage = getStorage(app);
 
-// Define APP_ID using your project ID, which will match your security rules
-export const APP_ID = firebaseConfig.projectId; // <--- This line exports it
-
-// Export auth, db, and storage. APP_ID is already exported above.
-export { app, auth, db, storage }; // <--- APP_ID removed from this list
+// Export your Firebase config and services
+export const APP_ID = firebaseConfig.projectId;
+export { app, auth, db, storage };
 
